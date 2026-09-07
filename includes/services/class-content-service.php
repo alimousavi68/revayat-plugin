@@ -218,8 +218,13 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 			}
 
 			// ۶. گونه واکاوی دیده‌بان
-			$obs_terms         = wp_get_object_terms( $id, 'observatory_badge', array( 'fields' => 'slugs' ) );
-			$observatory_badge = ( ! empty( $obs_terms ) && ! is_wp_error( $obs_terms ) ) ? $obs_terms[0] : '';
+			$obs_terms               = wp_get_object_terms( $id, 'observatory_badge' );
+			$observatory_badge       = '';
+			$observatory_badge_label = '';
+			if ( ! empty( $obs_terms ) && ! is_wp_error( $obs_terms ) ) {
+				$observatory_badge       = $obs_terms[0]->slug;
+				$observatory_badge_label = $obs_terms[0]->name;
+			}
 
 			// ۷. قالب رسانه
 			$fmt_terms    = wp_get_object_terms( $id, 'media_format', array( 'fields' => 'slugs' ) );
@@ -234,15 +239,16 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 			$analyst_field = ( ! empty( $field_terms ) && ! is_wp_error( $field_terms ) ) ? $field_terms[0] : '';
 
 			return array(
-				'editorial_placement' => $placement,
-				'category'            => $category,
-				'news_source'         => $news_source,
-				'security_level'      => $security_level,
-				'person_author'       => $person_author,
-				'observatory_badge'   => $observatory_badge,
-				'media_format'        => $media_format,
-				'dossier_topic'       => $dossier_topic,
-				'analyst_field'       => $analyst_field,
+				'editorial_placement'     => $placement,
+				'category'                => $category,
+				'news_source'             => $news_source,
+				'security_level'          => $security_level,
+				'person_author'           => $person_author,
+				'observatory_badge'       => $observatory_badge,
+				'observatory_badge_label' => $observatory_badge_label,
+				'media_format'            => $media_format,
+				'dossier_topic'           => $dossier_topic,
+				'analyst_field'           => $analyst_field,
 			);
 		}
 
@@ -296,6 +302,57 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 				'person_total_score' => (float) get_post_meta( $id, '_revayat_person_total_score', true ),
 				'person_votes'       => (int) get_post_meta( $id, '_revayat_person_votes', true ),
 			);
+		}
+
+		/**
+		 * واکشی مطالب یا پرونده‌های مرتبط بر اساس پست فعلی
+		 *
+		 * @param int $post_id شناسه پست مبدا.
+		 * @param int $count   تعداد پست‌های درخواستی.
+		 * @return array
+		 */
+		public static function get_related_posts( $post_id = 0, $count = 3 ) {
+			$post_id = (int) ( $post_id ?: get_the_ID() );
+			if ( ! $post_id ) {
+				return array();
+			}
+
+			$post = get_post( $post_id );
+			if ( ! $post instanceof WP_Post ) {
+				return array();
+			}
+
+			$post_type = $post->post_type;
+
+			$args = array(
+				'post_type'      => $post_type,
+				'posts_per_page' => (int) $count,
+				'post__not_in'   => array( $post_id ),
+				'orderby'        => 'date',
+				'order'          => 'DESC',
+			);
+
+			if ( 'special_dossier' === $post_type ) {
+				$topics = wp_get_object_terms( $post_id, 'dossier_topic', array( 'fields' => 'ids' ) );
+				if ( ! empty( $topics ) && ! is_wp_error( $topics ) ) {
+					$args['tax_query'] = array(
+						array(
+							'taxonomy' => 'dossier_topic',
+							'field'    => 'term_id',
+							'terms'    => $topics,
+						),
+					);
+				}
+			}
+
+			$results = self::get_posts_by_type( $post_type, $args );
+
+			if ( empty( $results ) && isset( $args['tax_query'] ) ) {
+				unset( $args['tax_query'] );
+				$results = self::get_posts_by_type( $post_type, $args );
+			}
+
+			return $results;
 		}
 	}
 }

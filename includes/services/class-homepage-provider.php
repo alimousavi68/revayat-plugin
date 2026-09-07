@@ -192,13 +192,31 @@ if ( ! class_exists( 'Revayat_Companion_Homepage_Provider' ) ) {
 		 * @return array
 		 */
 		public static function get_analysts_network_data() {
-			return Revayat_Companion_Content_Service::get_posts_by_type(
+			$posts = Revayat_Companion_Content_Service::get_posts_by_type(
 				'analyst_post',
 				array(
-					'posts_per_page' => 4,
+					'posts_per_page' => 8,
 					'orderby'        => 'date',
 					'order'          => 'DESC',
 				)
+			);
+
+			$analysts = Revayat_Companion_Content_Service::get_posts_by_type(
+				'person',
+				array(
+					'posts_per_page' => 5,
+					'orderby'        => 'date',
+					'order'          => 'ASC',
+				)
+			);
+
+			if ( empty( $posts ) && empty( $analysts ) ) {
+				return array();
+			}
+
+			return array(
+				'posts'    => $posts,
+				'analysts' => $analysts,
 			);
 		}
 
@@ -211,7 +229,7 @@ if ( ! class_exists( 'Revayat_Companion_Homepage_Provider' ) ) {
 			return Revayat_Companion_Content_Service::get_posts_by_type(
 				'multimedia',
 				array(
-					'posts_per_page' => 6,
+					'posts_per_page' => 8,
 					'orderby'        => 'date',
 					'order'          => 'DESC',
 				)
@@ -260,6 +278,14 @@ if ( ! class_exists( 'Revayat_Data_Service' ) ) {
 
 		public static function get_multimedia_data() {
 			return Revayat_Companion_Homepage_Provider::get_multimedia_data();
+		}
+
+		public static function get_single_data( $post = null ) {
+			return Revayat_Companion_Content_Service::normalize_post( $post ?: get_the_ID() );
+		}
+
+		public static function get_related_posts( $post_id = 0, $count = 3 ) {
+			return Revayat_Companion_Content_Service::get_related_posts( $post_id ?: get_the_ID(), $count );
 		}
 	}
 }
