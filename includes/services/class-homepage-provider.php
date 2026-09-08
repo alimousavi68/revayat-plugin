@@ -287,5 +287,9 @@ if ( ! class_exists( 'Revayat_Data_Service' ) ) {
 		public static function get_related_posts( $post_id = 0, $count = 3 ) {
 			return Revayat_Companion_Content_Service::get_related_posts( $post_id ?: get_the_ID(), $count );
 		}
+
+		public static function get_archive_data( $post_type, $args = array() ) {
+			return Revayat_Companion_Content_Service::get_archive_data( $post_type, $args );
+		}
 	}
 }

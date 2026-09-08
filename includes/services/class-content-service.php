@@ -63,6 +63,47 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 		}
 
 		/**
+		 * واکشی امن پست‌ها برای صفحات آرشیو همراه با متاداده‌های صفحه‌بندی
+		 *
+		 * @param string $post_type نوع پست‌تایپ.
+		 * @param array  $args      آرگومان‌های اضافی WP_Query (نظیر paged, posts_per_page, tax_query).
+		 * @return array ساختار [items, total_posts, max_pages, current_page].
+		 */
+		public static function get_archive_data( $post_type, $args = array() ) {
+			$paged    = isset( $args['paged'] ) ? max( 1, (int) $args['paged'] ) : ( get_query_var( 'paged' ) ? (int) get_query_var( 'paged' ) : 1 );
+			$defaults = array(
+				'post_type'              => $post_type,
+				'post_status'            => 'publish',
+				'posts_per_page'         => (int) get_option( 'posts_per_page', 9 ),
+				'paged'                  => $paged,
+				'orderby'                => 'date',
+				'order'                  => 'DESC',
+				'update_post_meta_cache' => true,
+				'update_post_term_cache' => true,
+			);
+
+			$query_args = wp_parse_args( $args, $defaults );
+			$query      = new WP_Query( $query_args );
+
+			$normalized = array();
+			if ( ! empty( $query->posts ) ) {
+				foreach ( $query->posts as $post ) {
+					$item = self::normalize_post( $post );
+					if ( ! empty( $item ) ) {
+						$normalized[] = $item;
+					}
+				}
+			}
+
+			return array(
+				'items'        => $normalized,
+				'total_posts'  => (int) $query->found_posts,
+				'max_pages'    => (int) $query->max_num_pages,
+				'current_page' => $paged,
+			);
+		}
+
+		/**
 		 * نرمال‌سازی شیء WP_Post به ساختار استاندارد قرارداد داده‌ای ترکیبی (Hybrid Contract)
 		 *
 		 * @param WP_Post|int $post شیء یا شناسه پست.
@@ -301,6 +342,7 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 				'expertise'          => (string) get_post_meta( $id, '_revayat_expertise', true ),
 				'person_total_score' => (float) get_post_meta( $id, '_revayat_person_total_score', true ),
 				'person_votes'       => (int) get_post_meta( $id, '_revayat_person_votes', true ),
+				'timeline_events'    => (array) ( get_post_meta( $id, '_revayat_timeline_events', true ) ?: array() ),
 			);
 		}
 
