@@ -75,6 +75,72 @@ if ( ! class_exists( 'Revayat_Companion_Meta_Fields' ) ) {
 		}
 
 		/**
+		 * پاکسازی آرایه پیوست‌های بولتن اتاق وضعیت
+		 *
+		 * @param mixed $meta_value مقدار خام فراداده.
+		 * @return array
+		 */
+		public static function sanitize_attachments_meta( $meta_value ) {
+			if ( empty( $meta_value ) || ! is_array( $meta_value ) ) {
+				return array();
+			}
+
+			$sanitized = array();
+			foreach ( $meta_value as $item ) {
+				if ( ! is_array( $item ) ) {
+					continue;
+				}
+
+				$sanitized[] = array(
+					'id'                 => absint( $item['id'] ?? 0 ),
+					'title'              => sanitize_text_field( $item['title'] ?? ( $item['name'] ?? '' ) ),
+					'file_name'          => sanitize_text_field( $item['file_name'] ?? ( $item['title'] ?? '' ) ),
+					'file_size'          => sanitize_text_field( $item['file_size'] ?? '' ),
+					'file_type'          => sanitize_key( $item['file_type'] ?? 'pdf' ),
+					'url'                => esc_url_raw( $item['url'] ?? '' ),
+					'is_view_only'       => ! empty( $item['is_view_only'] ),
+					'is_locked'          => ! empty( $item['is_locked'] ),
+					'min_security_level' => sanitize_key( $item['min_security_level'] ?? 'public' ),
+					'security_note'      => sanitize_text_field( $item['security_note'] ?? '' ),
+				);
+			}
+
+			return $sanitized;
+		}
+
+		/**
+		 * پاکسازی آرایه گالری سنسورهای پایش میدانی اتاق وضعیت
+		 *
+		 * @param mixed $meta_value مقدار خام فراداده.
+		 * @return array
+		 */
+		public static function sanitize_sensor_gallery_meta( $meta_value ) {
+			if ( empty( $meta_value ) || ! is_array( $meta_value ) ) {
+				return array();
+			}
+
+			$sanitized = array();
+			foreach ( $meta_value as $item ) {
+				if ( ! is_array( $item ) ) {
+					continue;
+				}
+
+				$sanitized[] = array(
+					'id'                 => absint( $item['id'] ?? 0 ),
+					'sensor_label'       => sanitize_text_field( $item['sensor_label'] ?? 'SENSOR' ),
+					'url'                => esc_url_raw( $item['url'] ?? '' ),
+					'thumb_url'          => esc_url_raw( $item['thumb_url'] ?? ( $item['url'] ?? '' ) ),
+					'caption'            => sanitize_text_field( $item['caption'] ?? '' ),
+					'timestamp'          => sanitize_text_field( $item['timestamp'] ?? '' ),
+					'coordinates'        => sanitize_text_field( $item['coordinates'] ?? '' ),
+					'min_security_level' => sanitize_key( $item['min_security_level'] ?? 'normal' ),
+				);
+			}
+
+			return $sanitized;
+		}
+
+		/**
 		 * ثبت فیلدهای متای اتاق وضعیت (situation_room)
 		 *
 		 * @return void
@@ -156,6 +222,72 @@ if ( ! class_exists( 'Revayat_Companion_Meta_Fields' ) ) {
 					'single'            => true,
 					'show_in_rest'      => true,
 					'sanitize_callback' => 'esc_url_raw',
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
+
+			register_post_meta(
+				$post_type,
+				'_revayat_sr_attachments',
+				array(
+					'type'              => 'array',
+					'description'       => 'لیست اسناد و فایل‌های ضمیمه بولتن پدافندی',
+					'single'            => true,
+					'show_in_rest'      => array(
+						'schema' => array(
+							'type'  => 'array',
+							'items' => array(
+								'type' => 'object',
+							),
+						),
+					),
+					'sanitize_callback' => array( 'Revayat_Companion_Meta_Fields', 'sanitize_attachments_meta' ),
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
+
+			register_post_meta(
+				$post_type,
+				'_revayat_sr_sensor_gallery',
+				array(
+					'type'              => 'array',
+					'description'       => 'تصاویر تاکتیکال و فریم‌های سنسور رصد میدانی',
+					'single'            => true,
+					'show_in_rest'      => array(
+						'schema' => array(
+							'type'  => 'array',
+							'items' => array(
+								'type' => 'object',
+							),
+						),
+					),
+					'sanitize_callback' => array( 'Revayat_Companion_Meta_Fields', 'sanitize_sensor_gallery_meta' ),
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
+
+			register_post_meta(
+				$post_type,
+				'_revayat_sr_source_org',
+				array(
+					'type'              => 'string',
+					'description'       => 'نام یگان یا نهاد رصدکننده بولتن',
+					'single'            => true,
+					'show_in_rest'      => true,
+					'sanitize_callback' => 'sanitize_text_field',
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
+
+			register_post_meta(
+				$post_type,
+				'_revayat_sr_redacted_notice',
+				array(
+					'type'              => 'string',
+					'description'       => 'پیام راهنمای احراز هویت برای کاربران غیرمجاز',
+					'single'            => true,
+					'show_in_rest'      => true,
+					'sanitize_callback' => 'sanitize_textarea_field',
 					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
 				)
 			);

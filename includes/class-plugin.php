@@ -158,7 +158,8 @@ if ( ! class_exists( 'Revayat_Companion_Plugin' ) ) {
 		 * ثبت هوک‌های عمومی و فرانت‌اند (برای کامیت‌های آتی)
 		 */
 		private function define_public_hooks() {
-			// اسکلت اولیه - در کامیت‌های بعدی توسعه خواهد یافت.
+			// فیلتر حفاظت از محتوای طبقه‌بندی‌شده اتاق وضعیت در زمان رندر the_content
+			$this->loader->add_filter( 'the_content', 'Revayat_Companion_Content_Service', 'protect_the_content', 10, 1 );
 		}
 
 		/**

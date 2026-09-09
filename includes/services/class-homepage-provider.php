@@ -291,5 +291,13 @@ if ( ! class_exists( 'Revayat_Data_Service' ) ) {
 		public static function get_archive_data( $post_type, $args = array() ) {
 			return Revayat_Companion_Content_Service::get_archive_data( $post_type, $args );
 		}
+
+		public static function get_user_clearance( $user = null ) {
+			return Revayat_Companion_Content_Service::get_user_clearance( $user );
+		}
+
+		public static function evaluate_bulletin_access( $post, $user = null ) {
+			return Revayat_Companion_Content_Service::evaluate_bulletin_access( $post, $user );
+		}
 	}
 }

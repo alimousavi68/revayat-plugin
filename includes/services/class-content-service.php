@@ -63,6 +63,326 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 		}
 
 		/**
+		 * تشخیص سطح دسترسی امنیتی کاربر جاری یا کاربر مشخص‌شده
+		 *
+		 * @param int|WP_User|null $user شناسه یا شیء کاربر (پیش‌فرض: کاربر جاری).
+		 * @return string 'guest' | 'normal' | 'high'
+		 */
+		public static function get_user_clearance( $user = null ) {
+			if ( null === $user ) {
+				if ( ! is_user_logged_in() ) {
+					return 'guest';
+				}
+				$user_obj = wp_get_current_user();
+			} elseif ( is_numeric( $user ) ) {
+				$user_obj = get_user_by( 'id', (int) $user );
+			} elseif ( $user instanceof WP_User ) {
+				$user_obj = $user;
+			} else {
+				return 'guest';
+			}
+
+			if ( ! $user_obj || ! $user_obj->exists() ) {
+				return 'guest';
+			}
+
+			// بررسی دسترسی سطح عالی (High): مدیران و دارندگان مجوز دسترسی بولتن‌های پدافندی
+			if (
+				user_can( $user_obj, 'administrator' ) ||
+				user_can( $user_obj, 'manage_options' ) ||
+				user_can( $user_obj, 'revayat_read_situation_room' ) ||
+				in_array( 'vip_subscriber', (array) $user_obj->roles, true ) ||
+				in_array( 'administrator', (array) $user_obj->roles, true )
+			) {
+				return 'high';
+			}
+
+			// کاربر عضو با دسترسی پایه / استاندارد
+			return 'normal';
+		}
+
+		/**
+		 * ارزیابی وضعیت دسترسی کاربر به یک بولتن وضعیت خاص
+		 *
+		 * @param int|WP_Post      $post شیء یا شناسه بولتن.
+		 * @param int|WP_User|null $user شناسه یا شیء کاربر.
+		 * @return array
+		 */
+		public static function evaluate_bulletin_access( $post, $user = null ) {
+			$post_obj = get_post( $post );
+			if ( ! $post_obj instanceof WP_Post ) {
+				return array(
+					'can_view_content'         => false,
+					'can_download_attachments' => false,
+					'can_view_gallery'         => false,
+					'user_clearance'           => 'guest',
+					'required_level'           => 'public',
+					'security_level'           => 'public',
+					'is_locked'                => true,
+					'lock_reason'              => 'بولتن تحلیلی نامعتبر است.',
+					'auth_url'                 => home_url( '/auth/?tab=login' ),
+					'login_url'                => home_url( '/auth/?tab=login' ),
+					'register_url'             => home_url( '/auth/?tab=register' ),
+					'upgrade_url'              => home_url( '/auth/?tab=upgrade' ),
+				);
+			}
+
+			$id             = (int) $post_obj->ID;
+			$user_clearance = self::get_user_clearance( $user );
+
+			// واکشی سطح امنیتی از تاکسونومی security_level
+			$sec_terms      = wp_get_object_terms( $id, 'security_level', array( 'fields' => 'slugs' ) );
+			$security_level = ( ! empty( $sec_terms ) && ! is_wp_error( $sec_terms ) ) ? $sec_terms[0] : 'public';
+
+			// نگاشت اسلاگ‌های هم‌ارز به مقادیر کانونیکال
+			if ( in_array( $security_level, array( 'classified', 'high', 'secret' ), true ) ) {
+				$canonical_level = 'classified';
+				$required_level  = 'high';
+			} elseif ( in_array( $security_level, array( 'restricted', 'normal', 'member' ), true ) ) {
+				$canonical_level = 'restricted';
+				$required_level  = 'normal';
+			} else {
+				$canonical_level = 'public';
+				$required_level  = 'public';
+			}
+
+			$is_explicitly_locked = (bool) get_post_meta( $id, '_revayat_sr_is_locked', true );
+			$custom_auth_url      = (string) get_post_meta( $id, '_revayat_sr_auth_url', true );
+			$custom_notice        = (string) get_post_meta( $id, '_revayat_sr_redacted_notice', true );
+
+			$can_view_content         = false;
+			$can_download_attachments = false;
+			$can_view_gallery         = false;
+			$lock_reason              = '';
+			$auth_url                 = $custom_auth_url;
+
+			if ( 'high' === $required_level ) {
+				if ( 'high' === $user_clearance ) {
+					$can_view_content         = true;
+					$can_download_attachments = true;
+					$can_view_gallery         = true;
+				} else {
+					$lock_reason = $custom_notice ?: ( 'normal' === $user_clearance
+						? 'دسترسی به اسناد پدافندی و راهبردی تنها با احراز هویت دو مرحله‌ای و ارتقای سطح ۱ (عالی) امکان‌پذیر است.'
+						: 'مشاهده اسناد طبقه‌بندی‌شده نیازمند ورود به حساب کاربری و تایید صلاحیت امنیتی است.' );
+					$auth_url    = $auth_url ?: home_url( 'normal' === $user_clearance ? '/auth/?tab=upgrade' : '/auth/?tab=login' );
+				}
+			} elseif ( 'normal' === $required_level ) {
+				if ( in_array( $user_clearance, array( 'normal', 'high' ), true ) ) {
+					$can_view_content         = true;
+					$can_download_attachments = true;
+					$can_view_gallery         = true;
+				} else {
+					$lock_reason = $custom_notice ?: 'برای مشاهده محتوای کامل این بولتن تحلیلی، عضویت و ورود به حساب کاربری الزامی است.';
+					$auth_url    = $auth_url ?: home_url( '/auth/?tab=login' );
+				}
+			} else {
+				// بولتن‌های سطح علنی (Public)
+				if ( $is_explicitly_locked && 'guest' === $user_clearance ) {
+					$can_view_content         = false;
+					$can_download_attachments = false;
+					$can_view_gallery         = false;
+					$lock_reason              = $custom_notice ?: 'این گزارش موقتاً محدود شده است. لطفاً وارد حساب خود شوید.';
+					$auth_url                 = $auth_url ?: home_url( '/auth/?tab=login' );
+				} else {
+					$can_view_content         = true;
+					$can_download_attachments = true;
+					$can_view_gallery         = true;
+				}
+			}
+
+			return array(
+				'can_view_content'         => $can_view_content,
+				'can_download_attachments' => $can_download_attachments,
+				'can_view_gallery'         => $can_view_gallery,
+				'user_clearance'           => $user_clearance,
+				'required_level'           => $required_level,
+				'security_level'           => $canonical_level,
+				'is_locked'                => ! $can_view_content,
+				'lock_reason'              => $lock_reason,
+				'auth_url'                 => $auth_url,
+				'login_url'                => home_url( '/auth/?tab=login' ),
+				'register_url'             => home_url( '/auth/?tab=register' ),
+				'upgrade_url'              => home_url( '/auth/?tab=upgrade' ),
+			);
+		}
+
+		/**
+		 * سانسور محتوای بولتن در صورت عدم احراز صلاحیت دسترسی
+		 *
+		 * @param string      $content متن اصلی خام یا فیلترشده.
+		 * @param array       $access  آرایه وضعیت دسترسی.
+		 * @param WP_Post|int $post    شیء یا شناسه پست.
+		 * @return string متن ایمن، سانسور شده و دارای پرده احراز هویت.
+		 */
+		public static function redact_bulletin_content( string $content, array $access, $post ) {
+			if ( ! empty( $access['can_view_content'] ) ) {
+				return $content;
+			}
+
+			$post_obj = get_post( $post );
+			$excerpt  = '';
+			if ( $post_obj instanceof WP_Post ) {
+				$excerpt = wp_strip_all_tags( get_the_excerpt( $post_obj ) );
+				if ( empty( $excerpt ) ) {
+					$excerpt = wp_trim_words( wp_strip_all_tags( $post_obj->post_content ), 35, '...' );
+				}
+			}
+
+			$lock_reason = ! empty( $access['lock_reason'] ) ? $access['lock_reason'] : 'دسترسی به این بخش محدود شده است.';
+			$auth_url    = ! empty( $access['auth_url'] ) ? $access['auth_url'] : home_url( '/auth/?tab=login' );
+			$action_text = ( isset( $access['user_clearance'] ) && 'normal' === $access['user_clearance'] ) ? 'درخواست ارتقای سطح دسترسی' : 'ورود به حساب / ثبت‌نام';
+
+			$html  = '<div class="sr-content-redacted-wrapper" data-reveal="up">';
+			if ( ! empty( $excerpt ) ) {
+				$html .= '<p class="sr-redacted-excerpt sr-gated-item__excerpt--blurred">' . esc_html( $excerpt ) . '</p>';
+			}
+			$html .= '<div class="tactical-lock-block">';
+			$html .= '<p class="lock-msg"><i class="ph-fill ph-lock-key"></i> ' . esc_html( $lock_reason ) . '</p>';
+			$html .= '<a href="' . esc_url( $auth_url ) . '" class="upgrade-action-btn">';
+			$html .= '<i class="ph ph-shield-check"></i>';
+			$html .= '<span>' . esc_html( $action_text ) . '</span>';
+			$html .= '</a>';
+			$html .= '</div>';
+			$html .= '</div>';
+
+			return $html;
+		}
+
+		/**
+		 * فیلتراسیون امن پیوست‌ها و حذف لینک‌های دانلود برای کاربران غیرمجاز
+		 *
+		 * @param array $raw_attachments لیست خام پیوست‌ها از متادیتا.
+		 * @param array $access          وضعیت دسترسی.
+		 * @return array
+		 */
+		public static function filter_bulletin_attachments( array $raw_attachments, array $access ) {
+			if ( empty( $raw_attachments ) || ! is_array( $raw_attachments ) ) {
+				return array();
+			}
+
+			$user_clearance = $access['user_clearance'] ?? 'guest';
+			$can_download   = ! empty( $access['can_download_attachments'] );
+
+			$filtered = array();
+			foreach ( $raw_attachments as $att ) {
+				if ( ! is_array( $att ) ) {
+					continue;
+				}
+
+				$min_level    = $att['min_security_level'] ?? 'public';
+				$is_view_only = ! empty( $att['is_view_only'] );
+
+				// ارزیابی صلاحیت نسبت به حداقل سطح فایل
+				$has_item_clearance = true;
+				if ( 'high' === $min_level && 'high' !== $user_clearance ) {
+					$has_item_clearance = false;
+				} elseif ( 'normal' === $min_level && 'guest' === $user_clearance ) {
+					$has_item_clearance = false;
+				}
+
+				$is_item_accessible = $can_download && $has_item_clearance;
+
+				$item_url      = $is_item_accessible ? (string) ( $att['url'] ?? '' ) : '';
+				$security_note = '';
+				if ( ! $is_item_accessible ) {
+					$security_note = ( 'guest' === $user_clearance ) ? 'نیازمند ورود به حساب کاربری' : 'نیازمند سطح دسترسی ۱ (عالی)';
+				} elseif ( $is_view_only ) {
+					$security_note = 'فقط مشاهده برخط (واترمارک شده)';
+				}
+
+				$filtered[] = array(
+					'id'              => (int) ( $att['id'] ?? 0 ),
+					'title'           => (string) ( $att['title'] ?? ( $att['name'] ?? '' ) ),
+					'file_name'       => (string) ( $att['file_name'] ?? ( $att['title'] ?? '' ) ),
+					'file_size'       => (string) ( $att['file_size'] ?? '' ),
+					'file_type'       => (string) ( $att['file_type'] ?? 'pdf' ),
+					'url'             => $item_url,
+					'is_view_only'    => $is_view_only,
+					'is_locked'       => ! $is_item_accessible,
+					'is_downloadable' => $is_item_accessible && ! $is_view_only,
+					'security_note'   => $security_note,
+				);
+			}
+
+			return $filtered;
+		}
+
+		/**
+		 * فیلتراسیون گالری سنسورها جهت جلوگیری از نشت تصاویر برای کاربران غیرمجاز
+		 *
+		 * @param array $raw_gallery لیست خام تصاویر سنسور.
+		 * @param array $access      وضعیت دسترسی.
+		 * @return array
+		 */
+		public static function filter_sensor_gallery( array $raw_gallery, array $access ) {
+			if ( empty( $raw_gallery ) || ! is_array( $raw_gallery ) ) {
+				return array(
+					'total_count' => 0,
+					'is_locked'   => false,
+					'items'       => array(),
+				);
+			}
+
+			$user_clearance = $access['user_clearance'] ?? 'guest';
+			$can_view       = ! empty( $access['can_view_gallery'] );
+			$total_count    = count( $raw_gallery );
+
+			$items = array();
+			foreach ( $raw_gallery as $item ) {
+				if ( ! is_array( $item ) ) {
+					continue;
+				}
+
+				$min_level          = $item['min_security_level'] ?? 'normal';
+				$has_item_clearance = true;
+				if ( 'high' === $min_level && 'high' !== $user_clearance ) {
+					$has_item_clearance = false;
+				} elseif ( 'normal' === $min_level && 'guest' === $user_clearance ) {
+					$has_item_clearance = false;
+				}
+
+				$is_item_accessible = $can_view && $has_item_clearance;
+
+				$items[] = array(
+					'id'           => (int) ( $item['id'] ?? 0 ),
+					'sensor_label' => (string) ( $item['sensor_label'] ?? 'SENSOR' ),
+					'url'          => $is_item_accessible ? (string) ( $item['url'] ?? '' ) : '',
+					'thumb_url'    => $is_item_accessible ? (string) ( $item['thumb_url'] ?? ( $item['url'] ?? '' ) ) : '',
+					'caption'      => $is_item_accessible ? (string) ( $item['caption'] ?? '' ) : 'تصویر طبقه‌بندی شده',
+					'timestamp'    => (string) ( $item['timestamp'] ?? '' ),
+					'coordinates'  => (string) ( $item['coordinates'] ?? '' ),
+					'is_locked'    => ! $is_item_accessible,
+				);
+			}
+
+			return array(
+				'total_count' => $total_count,
+				'is_locked'   => ! $can_view,
+				'items'       => $items,
+			);
+		}
+
+		/**
+		 * فیلتر هسته وردپرس روی the_content جهت حفاظت قطعی از بولتن‌های اتاق وضعیت
+		 *
+		 * @param string $content متن خام یا فیلترشده پست.
+		 * @return string
+		 */
+		public static function protect_the_content( $content ) {
+			if ( is_singular( 'situation_room' ) || ( 'situation_room' === get_post_type() && is_main_query() ) ) {
+				$post_id = get_the_ID();
+				if ( $post_id ) {
+					$access = self::evaluate_bulletin_access( $post_id );
+					if ( empty( $access['can_view_content'] ) ) {
+						return self::redact_bulletin_content( $content, $access, $post_id );
+					}
+				}
+			}
+			return $content;
+		}
+
+		/**
 		 * واکشی امن پست‌ها برای صفحات آرشیو همراه با متاداده‌های صفحه‌بندی
 		 *
 		 * @param string $post_type نوع پست‌تایپ.
@@ -83,7 +403,47 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 			);
 
 			$query_args = wp_parse_args( $args, $defaults );
-			$query      = new WP_Query( $query_args );
+
+			// فیلترهای اختصاصی اتاق وضعیت
+			if ( 'situation_room' === $post_type ) {
+				// فیلتر بر اساس سطح امنیت
+				if ( ! empty( $args['security_level'] ) && 'all' !== $args['security_level'] ) {
+					$sec_slug = sanitize_key( $args['security_level'] );
+					$query_args['tax_query'] = array(
+						array(
+							'taxonomy' => 'security_level',
+							'field'    => 'slug',
+							'terms'    => $sec_slug,
+						),
+					);
+				}
+
+				// فیلتر بر اساس گونه بولتن
+				if ( ! empty( $args['bulletin_type'] ) && 'all' !== $args['bulletin_type'] ) {
+					if ( ! isset( $query_args['meta_query'] ) ) {
+						$query_args['meta_query'] = array();
+					}
+					$query_args['meta_query'][] = array(
+						'key'     => '_revayat_bulletin_type',
+						'value'   => sanitize_text_field( $args['bulletin_type'] ),
+						'compare' => '=',
+					);
+				}
+
+				// فیلتر بر اساس سطح فوریت
+				if ( ! empty( $args['urgency_level'] ) && 'all' !== $args['urgency_level'] ) {
+					if ( ! isset( $query_args['meta_query'] ) ) {
+						$query_args['meta_query'] = array();
+					}
+					$query_args['meta_query'][] = array(
+						'key'     => '_revayat_urgency_level',
+						'value'   => sanitize_text_field( $args['urgency_level'] ),
+						'compare' => '=',
+					);
+				}
+			}
+
+			$query = new WP_Query( $query_args );
 
 			$normalized = array();
 			if ( ! empty( $query->posts ) ) {
@@ -95,12 +455,32 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 				}
 			}
 
-			return array(
+			$result = array(
 				'items'        => $normalized,
 				'total_posts'  => (int) $query->found_posts,
 				'max_pages'    => (int) $query->max_num_pages,
 				'current_page' => $paged,
 			);
+
+			if ( 'situation_room' === $post_type ) {
+				$result['user_clearance'] = self::get_user_clearance();
+				$result['filter_options'] = array(
+					'security_levels' => array(
+						array( 'slug' => 'all',        'label' => 'همه سطوح' ),
+						array( 'slug' => 'public',     'label' => 'علنی (سطح ۳)' ),
+						array( 'slug' => 'restricted', 'label' => 'محدود (سطح ۲)' ),
+						array( 'slug' => 'classified', 'label' => 'طبقه‌بندی‌شده (سطح ۱)' ),
+					),
+				);
+				$result['gated_meta']     = array(
+					'auth_url'    => home_url( '/auth/?tab=register' ),
+					'login_url'   => home_url( '/auth/?tab=login' ),
+					'upgrade_url' => home_url( '/auth/?tab=upgrade' ),
+					'notice'      => 'مشاهده بولتن‌های راهبردی و پدافندی منوط به عضویت و احراز هویت است.',
+				);
+			}
+
+			return $result;
 		}
 
 		/**
@@ -122,29 +502,108 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 			$reading_min    = max( 1, (int) ceil( $content_length / 800 ) );
 			$reading_time   = $reading_min . ' دقیقه';
 
+			$taxonomies = self::normalize_taxonomies( $post );
+			$meta       = self::normalize_meta( $post );
+			$media      = self::normalize_media( $post );
+			$post_type  = $post->post_type;
+
+			if ( 'situation_room' === $post_type ) {
+				$access           = self::evaluate_bulletin_access( $post );
+				$raw_attachments  = $meta['attachments'] ?? array();
+				$safe_attachments = self::filter_bulletin_attachments( $raw_attachments, $access );
+				$raw_gallery      = $meta['sensor_gallery'] ?? array();
+				$safe_gallery     = self::filter_sensor_gallery( $raw_gallery, $access );
+
+				if ( ! empty( $access['can_view_content'] ) ) {
+					$rendered_content = apply_filters( 'the_content', $post->post_content );
+					$raw_content      = $post->post_content;
+				} else {
+					$rendered_content = self::redact_bulletin_content( $post->post_content, $access, $post );
+					$raw_content      = '';
+				}
+
+				// همگام‌سازی پیوست‌ها و گالری امن در متا
+				$meta['attachments']    = $safe_attachments;
+				$meta['sensor_gallery'] = $safe_gallery;
+				$meta['is_locked']      = $access['is_locked'];
+
+				return array(
+					// ۱. شناسه هویت
+					'id'             => $id,
+
+					// ۲. ارجاع بومی شیء وردپرس
+					'entity'         => $post,
+
+					// ۳. فیلدهای نرمال‌سازی‌شده محتوا
+					'title'          => (string) get_the_title( $post ),
+					'excerpt'        => (string) wp_strip_all_tags( get_the_excerpt( $post ) ),
+					'content'        => (string) $rendered_content,
+					'raw_content'    => (string) $raw_content,
+					'permalink'      => (string) get_permalink( $post ),
+					'date'           => (string) get_the_date( '', $post ),
+					'time_ago'       => (string) human_time_diff( get_the_time( 'U', $post ), current_time( 'timestamp' ) ),
+					'reading_time'   => $reading_time,
+
+					// ۴. شیء رسانه منتزع‌شده
+					'media'          => $media,
+
+					// ۵. داده‌های ساختاریافته تاکسونومی
+					'taxonomies'     => $taxonomies,
+
+					// ۶. فراداده‌های تمیز و تایپ‌شده
+					'meta'           => $meta,
+
+					// ۷. دسترسی امنیتی، پیوست‌ها و گالری اتاق وضعیت
+					'access'         => $access,
+					'attachments'    => $safe_attachments,
+					'sensor_gallery' => $safe_gallery,
+				);
+			}
+
+			// سایر پست‌تایپ‌ها
 			return array(
 				// ۱. شناسه هویت
-				'id'           => $id,
+				'id'             => $id,
 
 				// ۲. ارجاع بومی شیء وردپرس
-				'entity'       => $post,
+				'entity'         => $post,
 
 				// ۳. فیلدهای نرمال‌سازی‌شده محتوا
-				'title'        => (string) get_the_title( $post ),
-				'excerpt'      => (string) wp_strip_all_tags( get_the_excerpt( $post ) ),
-				'permalink'    => (string) get_permalink( $post ),
-				'date'         => (string) get_the_date( '', $post ),
-				'time_ago'     => (string) human_time_diff( get_the_time( 'U', $post ), current_time( 'timestamp' ) ),
-				'reading_time' => $reading_time,
+				'title'          => (string) get_the_title( $post ),
+				'excerpt'        => (string) wp_strip_all_tags( get_the_excerpt( $post ) ),
+				'content'        => (string) apply_filters( 'the_content', $post->post_content ),
+				'raw_content'    => (string) $post->post_content,
+				'permalink'      => (string) get_permalink( $post ),
+				'date'           => (string) get_the_date( '', $post ),
+				'time_ago'       => (string) human_time_diff( get_the_time( 'U', $post ), current_time( 'timestamp' ) ),
+				'reading_time'   => $reading_time,
 
 				// ۴. شیء رسانه منتزع‌شده
-				'media'        => self::normalize_media( $post ),
+				'media'          => $media,
 
 				// ۵. داده‌های ساختاریافته تاکسونومی
-				'taxonomies'   => self::normalize_taxonomies( $post ),
+				'taxonomies'     => $taxonomies,
 
 				// ۶. فراداده‌های تمیز و تایپ‌شده
-				'meta'         => self::normalize_meta( $post ),
+				'meta'           => $meta,
+
+				// ۷. ساختار دسترسی پیش‌فرض
+				'access'         => array(
+					'can_view_content'         => true,
+					'can_download_attachments' => true,
+					'can_view_gallery'         => true,
+					'user_clearance'           => self::get_user_clearance(),
+					'required_level'           => 'public',
+					'security_level'           => 'public',
+					'is_locked'                => false,
+					'lock_reason'              => '',
+					'auth_url'                 => '',
+					'login_url'                => home_url( '/auth/?tab=login' ),
+					'register_url'             => home_url( '/auth/?tab=register' ),
+					'upgrade_url'              => home_url( '/auth/?tab=upgrade' ),
+				),
+				'attachments'    => array(),
+				'sensor_gallery' => array( 'total_count' => 0, 'is_locked' => false, 'items' => array() ),
 			);
 		}
 
@@ -214,8 +673,25 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 			$news_source  = ( ! empty( $source_terms ) && ! is_wp_error( $source_terms ) ) ? $source_terms[0] : '';
 
 			// ۴. سطح امنیت
-			$sec_terms      = wp_get_object_terms( $id, 'security_level', array( 'fields' => 'slugs' ) );
-			$security_level = ( ! empty( $sec_terms ) && ! is_wp_error( $sec_terms ) ) ? $sec_terms[0] : 'public';
+			$sec_terms            = wp_get_object_terms( $id, 'security_level' );
+			$security_level       = 'public';
+			$sec_label_map        = array(
+				'classified' => 'طبقه‌بندی‌شده (سطح ۱)',
+				'restricted' => 'محدود (سطح ۲)',
+				'public'     => 'علنی (سطح ۳)',
+				'high'       => 'طبقه‌بندی‌شده (سطح ۱)',
+				'normal'     => 'محدود (سطح ۲)',
+			);
+			$security_level_label = 'علنی (سطح ۳)';
+
+			if ( ! empty( $sec_terms ) && ! is_wp_error( $sec_terms ) ) {
+				$security_level       = $sec_terms[0]->slug;
+				$security_level_label = $sec_terms[0]->name;
+			}
+
+			if ( ! empty( $sec_label_map[ $security_level ] ) && ( $security_level === $security_level_label || empty( $security_level_label ) || ! preg_match( '/[\x{0600}-\x{06FF}]/u', $security_level_label ) ) ) {
+				$security_level_label = $sec_label_map[ $security_level ];
+			}
 
 			// ۵. پدیدآورنده / شخص (مطابق الگوی Shadow Taxonomy در ADR-004)
 			$person_terms  = wp_get_object_terms( $id, 'person_author' );
@@ -284,6 +760,7 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 				'category'                => $category,
 				'news_source'             => $news_source,
 				'security_level'          => $security_level,
+				'security_level_label'    => $security_level_label,
 				'person_author'           => $person_author,
 				'observatory_badge'       => $observatory_badge,
 				'observatory_badge_label' => $observatory_badge_label,
@@ -343,6 +820,10 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 				'person_total_score' => (float) get_post_meta( $id, '_revayat_person_total_score', true ),
 				'person_votes'       => (int) get_post_meta( $id, '_revayat_person_votes', true ),
 				'timeline_events'    => (array) ( get_post_meta( $id, '_revayat_timeline_events', true ) ?: array() ),
+				'source_org'         => (string) get_post_meta( $id, '_revayat_sr_source_org', true ),
+				'redacted_notice'    => (string) get_post_meta( $id, '_revayat_sr_redacted_notice', true ),
+				'attachments'        => (array) ( get_post_meta( $id, '_revayat_sr_attachments', true ) ?: array() ),
+				'sensor_gallery'     => (array) ( get_post_meta( $id, '_revayat_sr_sensor_gallery', true ) ?: array() ),
 			);
 		}
 
