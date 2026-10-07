@@ -119,6 +119,7 @@ if ( ! class_exists( 'Revayat_Companion_Plugin' ) ) {
 			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-person-identity.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-analyst-ratings.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-otp-service.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/admin/class-sms-settings.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-homepage-query.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-homepage-provider.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/users/class-user-portal.php';
@@ -172,6 +173,8 @@ if ( ! class_exists( 'Revayat_Companion_Plugin' ) ) {
 		 * ثبت هوک‌های مرتبط با بخش مدیریت وردپرس (برای کامیت‌های آتی)
 		 */
 		private function define_admin_hooks() {
+			$this->loader->add_action( 'admin_init', 'Revayat_Companion_SMS_Settings', 'register' );
+			$this->loader->add_action( 'admin_menu', 'Revayat_Companion_SMS_Settings', 'menu' );
 			$this->loader->add_action( 'admin_menu', 'Revayat_Companion_Person_Identity', 'register_tools_page' );
 			$this->loader->add_action( 'admin_post_revayat_migrate_analyst_identity', 'Revayat_Companion_Person_Identity', 'handle_migration' );
 			$this->loader->add_action( 'add_meta_boxes', 'Revayat_Companion_Dossier_Links_Admin', 'register_metabox' );
