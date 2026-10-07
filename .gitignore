@@ -1,0 +1,10 @@
+# Local environment files
+.DS_Store
+Thumbs.db
+.env
+.env.*
+*.log
+
+# Dependency directories, if introduced later
+node_modules/
+vendor/
