@@ -491,6 +491,110 @@ if ( ! class_exists( 'Revayat_Companion_Meta_Fields' ) ) {
 					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
 				)
 			);
+
+			register_post_meta(
+				$post_type,
+				'_revayat_obs_infographic_id',
+				array(
+					'type'              => 'integer',
+					'description'       => 'شناسه اتچمنت تصویر اینفوگرافیک یا داده‌نمای فریمینگ',
+					'single'            => true,
+					'show_in_rest'      => true,
+					'sanitize_callback' => 'absint',
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
+
+			register_post_meta(
+				$post_type,
+				'_revayat_obs_technique',
+				array(
+					'type'              => 'string',
+					'description'       => 'تکنیک شاخص چارچوب‌سازی و بازنمایی رسانه‌ای',
+					'single'            => true,
+					'show_in_rest'      => true,
+					'sanitize_callback' => 'sanitize_text_field',
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
+
+			register_post_meta(
+				$post_type,
+				'_revayat_obs_target_outlets',
+				array(
+					'type'              => 'string',
+					'description'       => 'فهرست رسانه‌ها و مراجع مورد رصد',
+					'single'            => true,
+					'show_in_rest'      => true,
+					'sanitize_callback' => 'sanitize_text_field',
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
+
+			register_post_meta(
+				$post_type,
+				'_revayat_obs_time_period',
+				array(
+					'type'              => 'string',
+					'description'       => 'بازه زمانی پایش و تحلیل روایت',
+					'single'            => true,
+					'show_in_rest'      => true,
+					'sanitize_callback' => 'sanitize_text_field',
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
+
+			register_post_meta(
+				$post_type,
+				'_revayat_obs_focal_quote',
+				array(
+					'type'              => 'string',
+					'description'       => 'گزاره یا کلیدواژه محوری مورد مناقشه',
+					'single'            => true,
+					'show_in_rest'      => true,
+					'sanitize_callback' => 'sanitize_textarea_field',
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
+
+			register_post_meta(
+				$post_type,
+				'_revayat_obs_frame_a_text',
+				array(
+					'type'              => 'string',
+					'description'       => 'متن فریم اول واکاوی (آلیاس استاندارد معماری)',
+					'single'            => true,
+					'show_in_rest'      => true,
+					'sanitize_callback' => 'sanitize_textarea_field',
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
+
+			register_post_meta(
+				$post_type,
+				'_revayat_obs_frame_b_text',
+				array(
+					'type'              => 'string',
+					'description'       => 'متن فریم دوم واکاوی (آلیاس استاندارد معماری)',
+					'single'            => true,
+					'show_in_rest'      => true,
+					'sanitize_callback' => 'sanitize_textarea_field',
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
+
+			register_post_meta(
+				$post_type,
+				'_revayat_obs_summary',
+				array(
+					'type'              => 'string',
+					'description'       => 'چکیده تحلیل روایت (آلیاس استاندارد معماری)',
+					'single'            => true,
+					'show_in_rest'      => true,
+					'sanitize_callback' => 'sanitize_textarea_field',
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
 		}
 
 		/**
@@ -551,6 +655,32 @@ if ( ! class_exists( 'Revayat_Companion_Meta_Fields' ) ) {
 
 			register_post_meta(
 				$post_type,
+				'_revayat_editorial_note',
+				array(
+					'type'              => 'string',
+					'description'       => 'بازخورد تحریریه برای تحلیلگر',
+					'single'            => true,
+					'show_in_rest'      => false,
+					'sanitize_callback' => 'sanitize_textarea_field',
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
+
+			register_post_meta(
+				$post_type,
+				'_revayat_review_status',
+				array(
+					'type'              => 'string',
+					'description'       => 'وضعیت گردش کار تحریریه',
+					'single'            => true,
+					'show_in_rest'      => false,
+					'sanitize_callback' => 'sanitize_key',
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
+
+			register_post_meta(
+				$post_type,
 				'_revayat_analysis_type',
 				array(
 					'type'              => 'string',
@@ -582,11 +712,91 @@ if ( ! class_exists( 'Revayat_Companion_Meta_Fields' ) ) {
 					'type'              => 'number',
 					'description'       => 'امتیاز کیفی یادداشت تحلیلی',
 					'single'            => true,
-					'show_in_rest'      => true,
+					'show_in_rest'      => false,
 					'sanitize_callback' => array( 'Revayat_Companion_Meta_Fields', 'sanitize_float' ),
 					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
 				)
 			);
+
+			register_post_meta(
+				$post_type,
+				'_revayat_analyst_quote',
+				array(
+					'type'              => 'string',
+					'description'       => 'نقل‌قول برجسته یا تز محوری یادداشت تحلیلی',
+					'single'            => true,
+					'show_in_rest'      => true,
+					'sanitize_callback' => 'sanitize_textarea_field',
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
+
+			register_post_meta(
+				$post_type,
+				'_revayat_reading_depth',
+				array(
+					'type'              => 'string',
+					'description'       => 'عمق مطالعه یا سطح تخصصی یادداشت تحلیلی (راهبردی، تخصصی، عمومی)',
+					'single'            => true,
+					'show_in_rest'      => true,
+					'sanitize_callback' => 'sanitize_text_field',
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
+
+			register_post_meta(
+				$post_type,
+				'_revayat_key_takeaways',
+				array(
+					'type'              => 'string',
+					'description'       => 'گزاره‌های کلیدی، دستاوردها و توصیه‌های راهبردی یادداشت',
+					'single'            => true,
+					'show_in_rest'      => true,
+					'sanitize_callback' => 'sanitize_textarea_field',
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
+
+			register_post_meta(
+				$post_type,
+				'_revayat_references',
+				array(
+					'type'              => 'string',
+					'description'       => 'منابع، ارجاعات و پانوشت‌های یادداشت تحلیلی',
+					'single'            => true,
+					'show_in_rest'      => true,
+					'sanitize_callback' => 'sanitize_textarea_field',
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
+
+			register_post_meta(
+				$post_type,
+				'_revayat_analyst_votes',
+				array(
+					'type'              => 'integer',
+					'description'       => 'تعداد آرای ثبت‌شده برای یادداشت تحلیلی',
+					'single'            => true,
+					'show_in_rest'      => false,
+					'sanitize_callback' => 'absint',
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
+
+			foreach ( array( '_revayat_analyst_vote_sum', '_revayat_analyst_rating_ready' ) as $aggregate_key ) {
+				register_post_meta(
+					$post_type,
+					$aggregate_key,
+					array(
+						'type'              => 'integer',
+						'description'       => 'داده تجمیعی داخلی سامانه رأی‌دهی',
+						'single'            => true,
+						'show_in_rest'      => false,
+						'sanitize_callback' => 'absint',
+						'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+					)
+				);
+			}
 		}
 
 		/**
@@ -596,6 +806,19 @@ if ( ! class_exists( 'Revayat_Companion_Meta_Fields' ) ) {
 		 */
 		protected function register_person_meta() {
 			$post_type = 'person';
+
+			register_post_meta(
+				$post_type,
+				'_revayat_user_id',
+				array(
+					'type'              => 'integer',
+					'description'       => 'شناسه حساب وردپرس متصل به پروفایل تحلیلگر',
+					'single'            => true,
+					'show_in_rest'      => false,
+					'sanitize_callback' => 'absint',
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
 
 			register_post_meta(
 				$post_type,
@@ -656,7 +879,7 @@ if ( ! class_exists( 'Revayat_Companion_Meta_Fields' ) ) {
 					'type'              => 'number',
 					'description'       => 'امتیاز تحلیلی میانگین کارشناس',
 					'single'            => true,
-					'show_in_rest'      => true,
+					'show_in_rest'      => false,
 					'sanitize_callback' => array( 'Revayat_Companion_Meta_Fields', 'sanitize_float' ),
 					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
 				)
@@ -669,7 +892,20 @@ if ( ! class_exists( 'Revayat_Companion_Meta_Fields' ) ) {
 					'type'              => 'integer',
 					'description'       => 'مجموع آرای کسب‌شده شخص در پلتفرم',
 					'single'            => true,
-					'show_in_rest'      => true,
+					'show_in_rest'      => false,
+					'sanitize_callback' => 'absint',
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
+
+			register_post_meta(
+				$post_type,
+				'_revayat_person_analyses_count',
+				array(
+					'type'              => 'integer',
+					'description'       => 'تعداد یادداشت‌های منتشرشده شخص',
+					'single'            => true,
+					'show_in_rest'      => false,
 					'sanitize_callback' => 'absint',
 					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
 				)

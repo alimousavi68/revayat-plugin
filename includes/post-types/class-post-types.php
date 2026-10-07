@@ -136,7 +136,7 @@ if ( ! class_exists( 'Revayat_Companion_Post_Types' ) ) {
 				'hierarchical'       => false,
 				'menu_position'      => 21,
 				'menu_icon'          => 'dashicons-portfolio',
-				'supports'           => array( 'title', 'editor', 'excerpt', 'thumbnail', 'revisions' ),
+				'supports'           => array( 'title', 'editor', 'excerpt', 'thumbnail', 'comments', 'revisions' ),
 				'show_in_rest'       => true,
 			);
 
@@ -280,7 +280,7 @@ if ( ! class_exists( 'Revayat_Companion_Post_Types' ) ) {
 				'hierarchical'       => false,
 				'menu_position'      => 24,
 				'menu_icon'          => 'dashicons-video-alt3',
-				'supports'           => array( 'title', 'editor', 'excerpt', 'thumbnail', 'revisions' ),
+				'supports'           => array( 'title', 'editor', 'excerpt', 'thumbnail', 'comments', 'revisions' ),
 				'show_in_rest'       => true,
 			);
 

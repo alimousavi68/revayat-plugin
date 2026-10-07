@@ -319,7 +319,7 @@ if ( ! class_exists( 'Revayat_Companion_Taxonomies' ) ) {
 				),
 			);
 
-			register_taxonomy( 'analyst_field', array( 'analyst_post' ), $args );
+			register_taxonomy( 'analyst_field', array( 'analyst_post', 'person' ), $args );
 		}
 
 		/**

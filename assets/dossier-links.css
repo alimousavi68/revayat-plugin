@@ -1,0 +1,6 @@
+.rv-dossier-editor li { display:flex; align-items:center; flex-wrap:wrap; gap:12px; padding:8px 0; border-bottom:1px solid #ddd; }
+.rv-dossier-editor li span { flex:1; overflow-wrap:anywhere; }
+.rv-dossier-search { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+.rv-dossier-search input { flex:1; min-width:120px; }
+.rv-search-results { max-height:240px; overflow:auto; }
+.rv-search-results button { white-space:normal; text-align:start; }

@@ -51,12 +51,16 @@ define( 'REVAYAT_COMPANION_BASENAME', plugin_basename( __FILE__ ) );
 function revayat_companion_activate() {
 	require_once REVAYAT_COMPANION_PATH . 'includes/taxonomies/class-taxonomies.php';
 	require_once REVAYAT_COMPANION_PATH . 'includes/post-types/class-post-types.php';
+	require_once REVAYAT_COMPANION_PATH . 'includes/users/class-user-portal.php';
 
 	$taxonomies = new Revayat_Companion_Taxonomies();
 	$taxonomies->register();
 
 	$post_types = new Revayat_Companion_Post_Types();
 	$post_types->register();
+
+	Revayat_Companion_User_Portal::register_roles();
+	Revayat_Companion_User_Portal::ensure_pages();
 
 	flush_rewrite_rules();
 }

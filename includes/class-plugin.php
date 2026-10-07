@@ -63,6 +63,9 @@ if ( ! class_exists( 'Revayat_Companion_Plugin' ) ) {
 		 */
 		protected $meta_fields;
 
+		/** @var Revayat_Companion_User_Portal */
+		protected $user_portal;
+
 		/**
 		 * سازنده کلاس به صورت محافظت‌شده جهت پیاده‌سازی الگوی Singleton
 		 */
@@ -109,12 +112,22 @@ if ( ! class_exists( 'Revayat_Companion_Plugin' ) ) {
 			require_once REVAYAT_COMPANION_PATH . 'includes/post-types/class-post-types.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/taxonomies/class-taxonomies.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/meta/class-meta-fields.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/meta/class-dossier-status.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-dossier-links.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/meta/class-dossier-links-admin.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-content-service.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-person-identity.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-analyst-ratings.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-otp-service.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-homepage-query.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-homepage-provider.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/users/class-user-portal.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/widgets/class-contextual-widget.php';
 
 			$this->post_types  = new Revayat_Companion_Post_Types();
 			$this->taxonomies  = new Revayat_Companion_Taxonomies();
 			$this->meta_fields = new Revayat_Companion_Meta_Fields();
+			$this->user_portal = new Revayat_Companion_User_Portal();
 		}
 
 		/**
@@ -128,12 +141,20 @@ if ( ! class_exists( 'Revayat_Companion_Plugin' ) ) {
 		 * ثبت هوک‌های مدل محتوا (CPTها، تاکسونومی‌ها و فیلدهای متا) در هوک بومی init وردپرس
 		 */
 		private function define_content_model_hooks() {
+			$this->loader->add_action('widgets_init', 'Revayat_Companion_Contextual_Widget', 'register');
+			$this->loader->add_action('admin_init', 'Revayat_Companion_Contextual_Widget', 'seed_defaults');
+			$this->loader->add_action('admin_init', 'Revayat_Companion_Contextual_Widget', 'refine_sidebars');
+			$this->loader->add_action( 'init', 'Revayat_Companion_Dossier_Links', 'register_meta', 20 );
+			$this->loader->add_action( 'init', 'Revayat_Companion_User_Portal', 'register_roles', 1 );
 			// تاکسونومی‌ها در اولویت ۵ ثبت می‌شوند تا قبل از CPTها در دسترس باشند
 			$this->loader->add_action( 'init', $this->taxonomies, 'register', 5 );
 			// پست‌تایپ‌های سفارشی در اولویت ۱۰ ثبت می‌شوند
 			$this->loader->add_action( 'init', $this->post_types, 'register', 10 );
 			// فیلدهای متا در اولویت ۲۰ ثبت می‌شوند تا بعد از CPTها رجیستر شوند
 			$this->loader->add_action( 'init', $this->meta_fields, 'register', 20 );
+			$this->loader->add_action( 'save_post_person', 'Revayat_Companion_Person_Identity', 'sync_person', 20, 2 );
+			$this->loader->add_action( 'transition_post_status', 'Revayat_Companion_Analyst_Ratings', 'handle_status_change', 20, 3 );
+			$this->loader->add_action( 'set_object_terms', 'Revayat_Companion_Analyst_Ratings', 'handle_terms_change', 20, 6 );
 		}
 
 		/**
@@ -151,15 +172,50 @@ if ( ! class_exists( 'Revayat_Companion_Plugin' ) ) {
 		 * ثبت هوک‌های مرتبط با بخش مدیریت وردپرس (برای کامیت‌های آتی)
 		 */
 		private function define_admin_hooks() {
-			// اسکلت اولیه - در کامیت‌های بعدی توسعه خواهد یافت.
+			$this->loader->add_action( 'admin_menu', 'Revayat_Companion_Person_Identity', 'register_tools_page' );
+			$this->loader->add_action( 'admin_post_revayat_migrate_analyst_identity', 'Revayat_Companion_Person_Identity', 'handle_migration' );
+			$this->loader->add_action( 'add_meta_boxes', 'Revayat_Companion_Dossier_Links_Admin', 'register_metabox' );
+			$this->loader->add_action( 'save_post_special_dossier', 'Revayat_Companion_Dossier_Links_Admin', 'save', 10, 2 );
+			$this->loader->add_action( 'admin_enqueue_scripts', 'Revayat_Companion_Dossier_Links_Admin', 'enqueue' );
+			$this->loader->add_action( 'wp_ajax_revayat_search_dossier_content', 'Revayat_Companion_Dossier_Links_Admin', 'search' );
+			$this->loader->add_action( 'wp_ajax_revayat_validate_dossier_documents', 'Revayat_Companion_Dossier_Links_Admin', 'validate_documents' );
+			$this->loader->add_action( 'add_meta_boxes', 'Revayat_Companion_Dossier_Status', 'register_metabox' );
+			$this->loader->add_action( 'save_post_special_dossier', 'Revayat_Companion_Dossier_Status', 'save_status', 10, 2 );
+			$this->loader->add_action( 'admin_init', $this->user_portal, 'restrict_admin' );
+			$this->loader->add_action( 'admin_menu', $this->user_portal, 'register_approval_page' );
+			$this->loader->add_action( 'admin_menu', $this->user_portal, 'register_special_access_page' );
+			$this->loader->add_action( 'admin_menu', $this->user_portal, 'register_email_report_page' );
+			$this->loader->add_action( 'admin_post_revayat_review_user', $this->user_portal, 'handle_review_user' );
+			$this->loader->add_action( 'admin_post_revayat_review_special_access', $this->user_portal, 'handle_review_special_access' );
+			$this->loader->add_action( 'add_meta_boxes', $this->user_portal, 'register_editorial_note_metabox' );
+			$this->loader->add_action( 'save_post_analyst_post', $this->user_portal, 'save_editorial_note', 10, 2 );
 		}
 
 		/**
 		 * ثبت هوک‌های عمومی و فرانت‌اند (برای کامیت‌های آتی)
 		 */
 		private function define_public_hooks() {
+			$this->loader->add_action( 'rest_api_init', 'Revayat_Companion_Content_Service', 'register_rest_routes' );
+			$this->loader->add_action( 'template_redirect', 'Revayat_Companion_Person_Identity', 'redirect_author_archive_to_person', 0 );
+			$this->loader->add_action( 'template_redirect', 'Revayat_Companion_Content_Service', 'enforce_situation_room_route', 0 );
+			$this->loader->add_action( 'pre_get_posts', 'Revayat_Companion_Content_Service', 'filter_protected_queries', 1 );
+            $this->loader->add_action( 'pre_get_posts', 'Revayat_Companion_Content_Service', 'prepare_multimedia_archive_query', 10 );
+			$this->loader->add_filter( 'rest_pre_dispatch', 'Revayat_Companion_Content_Service', 'protect_situation_room_rest', 10, 3 );
+			$this->loader->add_filter( 'wp_sitemaps_post_types', 'Revayat_Companion_Content_Service', 'filter_protected_sitemap_post_types' );
 			// فیلتر حفاظت از محتوای طبقه‌بندی‌شده اتاق وضعیت در زمان رندر the_content
 			$this->loader->add_filter( 'the_content', 'Revayat_Companion_Content_Service', 'protect_the_content', 10, 1 );
+			$this->loader->add_action( 'admin_post_nopriv_revayat_login', $this->user_portal, 'handle_login' );
+			$this->loader->add_action( 'admin_post_nopriv_revayat_register', $this->user_portal, 'handle_register' );
+			$this->loader->add_action( 'admin_post_nopriv_revayat_request_otp', $this->user_portal, 'handle_request_otp' );
+			$this->loader->add_action( 'admin_post_nopriv_revayat_recover_account', $this->user_portal, 'handle_recover_account' );
+			$this->loader->add_action( 'admin_post_revayat_submit_analyst_post', $this->user_portal, 'handle_submit_analyst_post' );
+			$this->loader->add_action( 'admin_post_revayat_update_profile', $this->user_portal, 'handle_update_profile' );
+			$this->loader->add_action( 'admin_post_revayat_mark_notifications_read', $this->user_portal, 'handle_mark_notifications_read' );
+			$this->loader->add_action( 'admin_post_revayat_request_special_access', $this->user_portal, 'handle_request_special_access' );
+			$this->loader->add_action( 'admin_post_revayat_vote_analyst_post', $this->user_portal, 'handle_vote_analyst_post' );
+			$this->loader->add_filter( 'show_admin_bar', $this->user_portal, 'hide_admin_bar' );
+			$this->loader->add_filter( 'login_redirect', $this->user_portal, 'login_redirect', 10, 3 );
+			$this->loader->add_action( 'phpmailer_init', $this->user_portal, 'configure_phpmailer' );
 		}
 
 		/**
