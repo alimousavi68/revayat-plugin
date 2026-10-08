@@ -77,12 +77,16 @@ class Revayat_Companion_Person_Identity {
 			return 0;
 		}
 		$person_id = absint( get_term_meta( $term->term_id, self::TERM_PERSON_META, true ) );
-		return $person_id && 'person' === get_post_type( $person_id ) ? $person_id : 0;
+		if ( $person_id && 'person' === get_post_type( $person_id ) ) { return $person_id; }
+		$legacy = get_page_by_path( $term->slug, OBJECT, 'person' );
+		return $legacy instanceof WP_Post ? (int) $legacy->ID : 0;
 	}
 
 	public static function get_term_for_person( $person_id ) {
 		$terms = get_terms( array( 'taxonomy' => 'person_author', 'hide_empty' => false, 'number' => 1, 'meta_key' => self::TERM_PERSON_META, 'meta_value' => absint( $person_id ) ) );
-		return ! is_wp_error( $terms ) && $terms ? $terms[0] : null;
+		if ( ! is_wp_error( $terms ) && $terms ) { return $terms[0]; }
+		$slug = get_post_field( 'post_name', absint( $person_id ) );
+		return $slug ? get_term_by( 'slug', $slug, 'person_author' ) : null;
 	}
 
 	/**

@@ -117,12 +117,23 @@ if ( ! class_exists( 'Revayat_Companion_Plugin' ) ) {
 			require_once REVAYAT_COMPANION_PATH . 'includes/meta/class-dossier-links-admin.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-content-service.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-person-identity.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-profile-avatar.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-analyst-ratings.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-sms-service.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-workflow-lock.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-otp-service.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-media-performance.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/admin/class-sms-settings.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-homepage-query.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-homepage-provider.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/users/class-user-portal.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-member-policy.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-auth-flow.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-member-profile.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-member-notes.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-private-documents.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-member-applications.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/admin/class-member-applications-admin.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/widgets/class-contextual-widget.php';
 
 			$this->post_types  = new Revayat_Companion_Post_Types();
@@ -153,6 +164,13 @@ if ( ! class_exists( 'Revayat_Companion_Plugin' ) ) {
 			$this->loader->add_action( 'init', $this->post_types, 'register', 10 );
 			// فیلدهای متا در اولویت ۲۰ ثبت می‌شوند تا بعد از CPTها رجیستر شوند
 			$this->loader->add_action( 'init', $this->meta_fields, 'register', 20 );
+			$this->loader->add_filter( 'get_avatar_data', 'Revayat_Companion_Profile_Avatar', 'filter_avatar', 20, 2 );
+			$this->loader->add_action( 'user_edit_form_tag', 'Revayat_Companion_Profile_Avatar', 'form_tag' );
+			$this->loader->add_action( 'show_user_profile', 'Revayat_Companion_Profile_Avatar', 'admin_fields' );
+			$this->loader->add_action( 'edit_user_profile', 'Revayat_Companion_Profile_Avatar', 'admin_fields' );
+			$this->loader->add_action( 'personal_options_update', 'Revayat_Companion_Profile_Avatar', 'admin_save' );
+			$this->loader->add_action( 'edit_user_profile_update', 'Revayat_Companion_Profile_Avatar', 'admin_save' );
+			$this->loader->add_action( 'admin_post_revayat_update_avatar', 'Revayat_Companion_Profile_Avatar', 'frontend_save' );
 			$this->loader->add_action( 'save_post_person', 'Revayat_Companion_Person_Identity', 'sync_person', 20, 2 );
 			$this->loader->add_action( 'transition_post_status', 'Revayat_Companion_Analyst_Ratings', 'handle_status_change', 20, 3 );
 			$this->loader->add_action( 'set_object_terms', 'Revayat_Companion_Analyst_Ratings', 'handle_terms_change', 20, 6 );
@@ -173,8 +191,11 @@ if ( ! class_exists( 'Revayat_Companion_Plugin' ) ) {
 		 * ثبت هوک‌های مرتبط با بخش مدیریت وردپرس (برای کامیت‌های آتی)
 		 */
 		private function define_admin_hooks() {
+			$this->loader->add_action( 'revayat_access_status_changed', 'Revayat_Companion_SMS_Service', 'notify_access', 10, 4 );
+			$this->loader->add_action( 'revayat_analyst_post_status_changed', 'Revayat_Companion_SMS_Service', 'notify_post', 10, 3 );
 			$this->loader->add_action( 'admin_init', 'Revayat_Companion_SMS_Settings', 'register' );
 			$this->loader->add_action( 'admin_menu', 'Revayat_Companion_SMS_Settings', 'menu' );
+			$this->loader->add_action( 'admin_enqueue_scripts', 'Revayat_Companion_SMS_Settings', 'enqueue' );
 			$this->loader->add_action( 'admin_menu', 'Revayat_Companion_Person_Identity', 'register_tools_page' );
 			$this->loader->add_action( 'admin_post_revayat_migrate_analyst_identity', 'Revayat_Companion_Person_Identity', 'handle_migration' );
 			$this->loader->add_action( 'add_meta_boxes', 'Revayat_Companion_Dossier_Links_Admin', 'register_metabox' );
@@ -198,6 +219,7 @@ if ( ! class_exists( 'Revayat_Companion_Plugin' ) ) {
 		 * ثبت هوک‌های عمومی و فرانت‌اند (برای کامیت‌های آتی)
 		 */
 		private function define_public_hooks() {
+			$this->loader->add_filter( 'image_editor_output_format', 'Revayat_Companion_Media_Performance', 'prefer_webp_for_jpeg' );
 			$this->loader->add_action( 'rest_api_init', 'Revayat_Companion_Content_Service', 'register_rest_routes' );
 			$this->loader->add_action( 'template_redirect', 'Revayat_Companion_Person_Identity', 'redirect_author_archive_to_person', 0 );
 			$this->loader->add_action( 'template_redirect', 'Revayat_Companion_Content_Service', 'enforce_situation_room_route', 0 );
@@ -207,15 +229,39 @@ if ( ! class_exists( 'Revayat_Companion_Plugin' ) ) {
 			$this->loader->add_filter( 'wp_sitemaps_post_types', 'Revayat_Companion_Content_Service', 'filter_protected_sitemap_post_types' );
 			// فیلتر حفاظت از محتوای طبقه‌بندی‌شده اتاق وضعیت در زمان رندر the_content
 			$this->loader->add_filter( 'the_content', 'Revayat_Companion_Content_Service', 'protect_the_content', 10, 1 );
+			$this->loader->add_action( 'init', $this->user_portal, 'enforce_active_session', 20 );
+			$this->loader->add_filter( 'wp_authenticate_user', $this->user_portal, 'prevent_suspended_authentication', 30, 1 );
+			$this->loader->add_action( 'init', 'Revayat_Companion_Member_Applications', 'register' );
+            $this->loader->add_filter( 'preprocess_comment', 'Revayat_Companion_Member_Policy', 'comment_guard' );
+            $this->loader->add_filter( 'pre_comment_approved', 'Revayat_Companion_Member_Policy', 'moderate_guest_comment', 20, 2 );
+			$this->loader->add_action( 'admin_menu', 'Revayat_Companion_Member_Applications_Admin', 'menu' );
+			$this->loader->add_action( 'admin_init', 'Revayat_Companion_Member_Applications_Admin', 'settings' );
+			$this->loader->add_action( 'admin_post_revayat_application_review', 'Revayat_Companion_Member_Applications_Admin', 'decide' );
+			$this->loader->add_action( 'admin_post_revayat_member_application', 'Revayat_Companion_Member_Applications', 'handle' );
+			$this->loader->add_action( 'wp_ajax_revayat_member_application', 'Revayat_Companion_Member_Applications', 'handle' );
+			$this->loader->add_action( 'admin_post_revayat_private_document', 'Revayat_Companion_Private_Documents', 'download' );
+			$this->loader->add_action( 'revayat_private_document_cleanup', 'Revayat_Companion_Private_Documents', 'cleanup' );
+			foreach ( array( 'wp_ajax_', 'admin_post_' ) as $prefix ) {
+				$this->loader->add_action( $prefix . 'revayat_member_note', 'Revayat_Companion_Member_Notes', 'handle' );
+				$this->loader->add_action( $prefix . 'revayat_note_review', 'Revayat_Companion_Member_Notes', 'handle_review' );
+			}
+			$this->loader->add_action( 'wp_ajax_revayat_member_profile', 'Revayat_Companion_Member_Profile', 'handle' );
+			$this->loader->add_action( 'admin_post_revayat_member_profile', 'Revayat_Companion_Member_Profile', 'handle' );
+			foreach ( array( 'wp_ajax_', 'wp_ajax_nopriv_' ) as $prefix ) {
+				$this->loader->add_action( $prefix . 'revayat_auth_context', 'Revayat_Companion_Auth_Flow', 'context' );
+				$this->loader->add_action( $prefix . 'revayat_auth_flow', 'Revayat_Companion_Auth_Flow', 'handle' );
+			}
 			$this->loader->add_action( 'admin_post_nopriv_revayat_login', $this->user_portal, 'handle_login' );
-			$this->loader->add_action( 'admin_post_nopriv_revayat_register', $this->user_portal, 'handle_register' );
+			$this->loader->add_action( 'admin_post_nopriv_revayat_otp_auth', $this->user_portal, 'handle_otp_auth' );
 			$this->loader->add_action( 'admin_post_nopriv_revayat_request_otp', $this->user_portal, 'handle_request_otp' );
 			$this->loader->add_action( 'admin_post_nopriv_revayat_recover_account', $this->user_portal, 'handle_recover_account' );
+			$this->loader->add_action( 'admin_post_revayat_set_password', $this->user_portal, 'handle_set_password' );
 			$this->loader->add_action( 'admin_post_revayat_submit_analyst_post', $this->user_portal, 'handle_submit_analyst_post' );
 			$this->loader->add_action( 'admin_post_revayat_update_profile', $this->user_portal, 'handle_update_profile' );
 			$this->loader->add_action( 'admin_post_revayat_mark_notifications_read', $this->user_portal, 'handle_mark_notifications_read' );
 			$this->loader->add_action( 'admin_post_revayat_request_special_access', $this->user_portal, 'handle_request_special_access' );
 			$this->loader->add_action( 'admin_post_revayat_vote_analyst_post', $this->user_portal, 'handle_vote_analyst_post' );
+			$this->loader->add_action( 'wp_ajax_revayat_vote_analyst_post', $this->user_portal, 'handle_vote_analyst_post' );
 			$this->loader->add_filter( 'show_admin_bar', $this->user_portal, 'hide_admin_bar' );
 			$this->loader->add_filter( 'login_redirect', $this->user_portal, 'login_redirect', 10, 3 );
 			$this->loader->add_action( 'phpmailer_init', $this->user_portal, 'configure_phpmailer' );

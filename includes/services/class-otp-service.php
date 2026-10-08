@@ -11,55 +11,29 @@ interface Revayat_OTP_Gateway_Interface {
 
 class Revayat_OTP_SMSIR_Gateway implements Revayat_OTP_Gateway_Interface {
 	public function send( $mobile, $code, $context ) {
-		$api_key = (string) Revayat_Companion_SMS_Settings::get( 'smsir_api_key' );
-		$template_id = (int) Revayat_Companion_SMS_Settings::get( 'recover' === $context ? 'smsir_recover_id' : 'smsir_register_id' );
-		$parameter = (string) Revayat_Companion_SMS_Settings::get( 'smsir_parameter' );
-		if ( '' === $api_key || $template_id < 1 || '' === $parameter ) {
-			return new WP_Error( 'smsir_unconfigured', 'تنظیمات SMS.ir کامل نیست.' );
-		}
-		$response = wp_remote_post( 'https://api.sms.ir/v1/send/verify', array(
-			'timeout' => 15,
-			'headers' => array( 'Accept' => 'application/json', 'Content-Type' => 'application/json', 'X-API-KEY' => $api_key ),
-			'body' => wp_json_encode( array( 'mobile' => $mobile, 'templateId' => $template_id, 'parameters' => array( array( 'name' => $parameter, 'value' => (string) $code ) ) ) ),
-		) );
-		if ( is_wp_error( $response ) ) { return $response; }
-		$http = wp_remote_retrieve_response_code( $response );
-		$body = json_decode( wp_remote_retrieve_body( $response ), true );
-		if ( $http >= 200 && $http < 300 && is_array( $body ) && 1 === (int) ( $body['status'] ?? 0 ) ) { return true; }
-		$message = is_array( $body ) ? sanitize_text_field( $body['message'] ?? '' ) : '';
-		return new WP_Error( 'smsir_rejected', $message ?: 'سرویس SMS.ir درخواست را نپذیرفت.' );
+		$result = Revayat_Companion_SMS_Service::send( $mobile, 'recover' === $context ? 'recover' : 'auth', array( 'Code' => (string) $code ), 'smsir' );
+		return is_wp_error( $result ) ? $result : true;
+	}
+}
+
+class Revayat_OTP_IPPanel_Gateway implements Revayat_OTP_Gateway_Interface {
+	public function send( $mobile, $code, $context ) {
+		$result = Revayat_Companion_SMS_Service::send( $mobile, 'recover' === $context ? 'recover' : 'auth', array( 'Code' => (string) $code ), 'ippanel' );
+		return is_wp_error( $result ) ? $result : true;
 	}
 }
 
 class Revayat_OTP_Webhook_Gateway implements Revayat_OTP_Gateway_Interface {
 	public function send( $mobile, $code, $context ) {
-		$url = (string) Revayat_Companion_SMS_Settings::get( 'webhook_url' );
-		if ( ! $url ) {
-			return new WP_Error( 'otp_gateway_unconfigured', 'درگاه OTP پیکربندی نشده است.' );
-		}
-		$headers = array( 'Content-Type' => 'application/json' );
-		$token = (string) Revayat_Companion_SMS_Settings::get( 'webhook_token' );
-		if ( $token ) {
-			$headers['Authorization'] = 'Bearer ' . $token;
-		}
-		$response = wp_remote_post(
-			$url,
-			array(
-				'timeout' => 10,
-				'headers' => $headers,
-				'body'    => wp_json_encode( array( 'mobile' => $mobile, 'code' => $code, 'context' => $context, 'template' => Revayat_Companion_SMS_Settings::get( 'webhook_template' ) ) ),
-			)
-		);
-		if ( is_wp_error( $response ) ) {
-			return $response;
-		}
-		$code_http = wp_remote_retrieve_response_code( $response );
-		return $code_http >= 200 && $code_http < 300 ? true : new WP_Error( 'otp_gateway_rejected', 'درگاه OTP درخواست را نپذیرفت.' );
+		// Keep the old webhook context names for existing integrations.
+		$result = Revayat_Companion_SMS_Service::send( $mobile, 'recover' === $context ? 'recover' : 'auth', array( 'Code' => (string) $code, '_webhook_context' => $context ), 'webhook' );
+		return is_wp_error( $result ) ? $result : true;
 	}
 }
 
 class Revayat_Companion_OTP_Service {
 	const TTL_SECONDS = 120;
+	const RESEND_SECONDS = 60;
 	const WINDOW      = 900;
 	const MAX_SENDS   = 3;
 	const MAX_TRIES   = 5;
@@ -72,12 +46,29 @@ class Revayat_Companion_OTP_Service {
 		return isset( $_SERVER['REMOTE_ADDR'] ) ? sanitize_text_field( wp_unslash( $_SERVER['REMOTE_ADDR'] ) ) : 'unknown';
 	}
 
+	public static function digits( $value ) {
+		return strtr( (string) $value, array_combine( preg_split( '//u', '۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩', -1, PREG_SPLIT_NO_EMPTY ), str_split( '01234567890123456789' ) ) );
+	}
+	public static function timing( $mobile, $context ) {
+		$data = get_transient( self::key( 'challenge', $context . ':' . Revayat_Companion_User_Portal::normalize_mobile( $mobile ) ) );
+		$created = is_array( $data ) ? absint( $data['created'] ?? 0 ) : 0;
+		return array( 'server_time' => time(), 'expires_at' => $created ? $created + self::TTL_SECONDS : 0, 'resend_available_at' => $created ? $created + self::RESEND_SECONDS : 0 );
+	}
 	public static function request( $mobile, $context = 'register' ) {
+		$mobile = Revayat_Companion_User_Portal::normalize_mobile( $mobile );
+		return Revayat_Companion_Workflow_Lock::run( 'otp-ip:' . self::client_ip(), static function () use ( $mobile, $context ) {
+			return Revayat_Companion_Workflow_Lock::run( 'otp:' . $mobile, static function () use ( $mobile, $context ) { return self::issue( $mobile, $context ); } );
+		} );
+	}
+
+	private static function issue( $mobile, $context ) {
 		$mobile  = Revayat_Companion_User_Portal::normalize_mobile( $mobile );
-		$context = in_array( $context, array( 'register', 'recover' ), true ) ? $context : 'register';
+		$context = in_array( $context, array( 'auth', 'register', 'recover', 'mobile_change' ), true ) ? $context : 'auth';
 		if ( ! preg_match( '/^09\d{9}$/', $mobile ) ) {
 			return new WP_Error( 'invalid_mobile', 'شماره موبایل معتبر نیست.' );
 		}
+		$timing = self::timing( $mobile, $context );
+		if ( $timing['resend_available_at'] > time() ) { return new WP_Error( 'otp_cooldown', 'برای ارسال دوباره کد تا پایان شمارش معکوس صبر کنید.', $timing ); }
 		foreach ( array( 'mobile:' . $mobile, 'ip:' . self::client_ip() ) as $bucket ) {
 			$key   = self::key( 'rate', $bucket );
 			$count = absint( get_transient( $key ) );
@@ -90,9 +81,11 @@ class Revayat_Companion_OTP_Service {
 		$test_code = Revayat_Companion_User_Portal::get_test_otp();
 		$code      = $test_code ?: (string) wp_rand( 100000, 999999 );
 		if ( ! $test_code ) {
-			$provider = (string) Revayat_Companion_SMS_Settings::get( 'provider' );
+			$provider = Revayat_Companion_SMS_Service::provider( 'recover' === $context ? 'recover' : 'auth' );
 			if ( 'disabled' === $provider ) { return new WP_Error( 'otp_disabled', 'ارسال کد یک‌بارمصرف موقتاً غیرفعال است.' ); }
-			$gateway = 'webhook' === $provider ? new Revayat_OTP_Webhook_Gateway() : new Revayat_OTP_SMSIR_Gateway();
+			$gateways = array( 'webhook' => 'Revayat_OTP_Webhook_Gateway', 'smsir' => 'Revayat_OTP_SMSIR_Gateway', 'ippanel' => 'Revayat_OTP_IPPanel_Gateway' );
+			if ( ! isset( $gateways[ $provider ] ) ) { return new WP_Error( 'invalid_otp_gateway', 'درگاه OTP معتبر نیست.' ); }
+			$gateway = new $gateways[ $provider ]();
 			$gateway = apply_filters( 'revayat_otp_gateway', $gateway, $context );
 			if ( ! $gateway instanceof Revayat_OTP_Gateway_Interface ) {
 				return new WP_Error( 'invalid_otp_gateway', 'درگاه OTP معتبر نیست.' );
@@ -113,6 +106,13 @@ class Revayat_Companion_OTP_Service {
 
 	public static function verify( $mobile, $code, $context = 'register' ) {
 		$mobile = Revayat_Companion_User_Portal::normalize_mobile( $mobile );
+		$code = preg_replace( '/\D+/', '', self::digits( $code ) );
+		return Revayat_Companion_Workflow_Lock::run( 'otp:' . $mobile, static function () use ( $mobile, $code, $context ) { return self::consume( $mobile, $code, $context ); } );
+	}
+
+	private static function consume( $mobile, $code, $context ) {
+		$mobile  = Revayat_Companion_User_Portal::normalize_mobile( $mobile );
+		$context = in_array( $context, array( 'auth', 'register', 'recover', 'mobile_change' ), true ) ? $context : 'auth';
 		$key    = self::key( 'challenge', $context . ':' . $mobile );
 		$data   = get_transient( $key );
 		if ( ! is_array( $data ) || empty( $data['hash'] ) ) {

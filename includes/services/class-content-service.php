@@ -26,6 +26,8 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 	 * کلاس سرویس استخراج و تبدیل محتوا
 	 */
 	class Revayat_Companion_Content_Service {
+		/** فقط هنگام اجرای کوئری محدود پیش‌نمایش صفحه اصلی فعال می‌شود. */
+		private static $is_situation_teaser_query = false;
 
 		/**
 		 * واکشی امن پست‌ها بر اساس پست‌تایپ و آرگومان‌های سفارشی
@@ -66,6 +68,46 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 			return $normalized;
 		}
 
+		/**
+		 * واکشی پیش‌نمایش عمومی و محدود اتاق وضعیت برای صفحه اصلی.
+		 *
+		 * این قرارداد عمداً فقط تیتر و تاریخ را برمی‌گرداند؛ شناسه، پیوند، متن،
+		 * پیوست و متادیتای بولتن برای کاربر فاقد مجوز افشا نمی‌شود.
+		 *
+		 * @param int $limit حداکثر تعداد تیترها.
+		 * @return array
+		 */
+		public static function get_situation_room_teasers( $limit = 4 ) {
+			$limit = max( 1, min( 4, absint( $limit ) ) );
+			self::$is_situation_teaser_query = true;
+			try {
+				$query = new WP_Query(
+					array(
+						'post_type'              => 'situation_room',
+						'post_status'            => 'publish',
+						'posts_per_page'         => $limit,
+						'orderby'                => 'date',
+						'order'                  => 'DESC',
+						'no_found_rows'          => true,
+						'update_post_meta_cache' => false,
+						'update_post_term_cache' => false,
+					)
+				);
+			} finally {
+				self::$is_situation_teaser_query = false;
+			}
+
+			return array_map(
+				static function ( $post ) {
+					return array(
+						'title' => sanitize_text_field( get_the_title( $post ) ),
+						'date'  => get_the_date( '', $post ),
+					);
+				},
+				$query->posts
+			);
+		}
+
 		/** پیش‌بارگذاری term meta رابطه اشخاص برای جلوگیری از کوئری کارت‌به‌کارت. */
 		private static function prime_person_term_meta( $posts ) {
 			if ( ! taxonomy_exists( 'person_author' ) || ! $posts ) {
@@ -102,16 +144,7 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 				return 'guest';
 			}
 
-			// بررسی دسترسی سطح عالی (High): مدیران و دارندگان مجوز دسترسی بولتن‌های پدافندی
-			if (
-				user_can( $user_obj, 'administrator' ) ||
-				user_can( $user_obj, 'manage_options' ) ||
-				user_can( $user_obj, 'revayat_read_situation_room' ) ||
-				in_array( 'vip_subscriber', (array) $user_obj->roles, true ) ||
-				in_array( 'administrator', (array) $user_obj->roles, true )
-			) {
-				return 'high';
-			}
+			if ( Revayat_Companion_Member_Policy::can_read_room( $user_obj->ID ) ) { return 'high'; }
 
 			// کاربر عضو با دسترسی پایه / استاندارد
 			return 'normal';
@@ -124,11 +157,7 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 			} elseif ( is_numeric( $user ) ) {
 				$user = get_user_by( 'id', (int) $user );
 			}
-			return $user instanceof WP_User && $user->exists() && (
-				user_can( $user, 'revayat_read_situation_room' ) ||
-				user_can( $user, 'manage_options' ) ||
-				user_can( $user, 'edit_others_posts' )
-			);
+			return $user instanceof WP_User && Revayat_Companion_Member_Policy::can_read_room( $user->ID );
 		}
 
 		/** گیت مسیر پیش از انتخاب و رندر تمپلیت. */
@@ -174,6 +203,14 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 				return;
 			}
 			$post_type = $query->get( 'post_type' );
+			if ( 'situation_room' === $post_type && self::$is_situation_teaser_query ) {
+				$query->set( 'post_status', 'publish' );
+				$query->set( 'posts_per_page', max( 1, min( 4, (int) $query->get( 'posts_per_page' ) ) ) );
+				$query->set( 'no_found_rows', true );
+				$query->set( 'update_post_meta_cache', false );
+				$query->set( 'update_post_term_cache', false );
+				return;
+			}
 			if ( 'situation_room' === $post_type || ( is_array( $post_type ) && in_array( 'situation_room', $post_type, true ) ) ) {
 				$query->set( 'post__in', array( 0 ) );
 				return;
@@ -785,6 +822,21 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 		 * @param array  $args      آرگومان‌های اضافی WP_Query (نظیر paged, posts_per_page, tax_query).
 		 * @return array ساختار [items, total_posts, max_pages, current_page].
 		 */
+		/** Profile feeds fail closed and never inherit archive filters from the URL. */
+		public static function get_person_posts( $person_id, $page = 1 ) {
+			$term = 'person' === get_post_type( $person_id ) ? Revayat_Companion_Person_Identity::get_term_for_person( $person_id ) : null;
+			if ( ! $term instanceof WP_Term ) {
+				return array( 'items' => array(), 'total_posts' => 0, 'max_pages' => 0 );
+			}
+			$query = new WP_Query( array(
+				'post_type' => 'analyst_post', 'post_status' => 'publish', 'has_password' => false,
+				'posts_per_page' => 10, 'paged' => max( 1, absint( $page ) ),
+				'orderby' => 'date', 'order' => 'DESC', 'ignore_sticky_posts' => true,
+				'tax_query' => array( array( 'taxonomy' => 'person_author', 'field' => 'term_id', 'terms' => array( $term->term_id ) ) ),
+			) );
+			return array( 'items' => array_map( array( __CLASS__, 'normalize_post' ), $query->posts ), 'total_posts' => (int) $query->found_posts, 'max_pages' => (int) $query->max_num_pages );
+		}
+
 		public static function get_archive_data( $post_type, $args = array() ) {
 			if ( 'situation_room' === $post_type && ! self::can_access_situation_room() ) {
 				return array(
@@ -1225,8 +1277,8 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 			if ( 'analyst_post' === $post_type ) {
 				$person_author = $taxonomies['person_author'] ?? array();
 				$author_name   = ! empty( $person_author['name'] ) ? $person_author['name'] : (string) get_the_author_meta( 'display_name', $post->post_author );
-				$author_role   = ! empty( $person_author['role'] ) ? $person_author['role'] : (string) ( get_the_author_meta( 'headline', $post->post_author ) ?: 'تحلیلگر اندیشکده' );
-				$author_avatar = ! empty( $person_author['avatar'] ) ? $person_author['avatar'] : (string) get_avatar_url( $post->post_author, array( 'size' => 96 ) );
+				$author_role   = (string) ( $person_author['role'] ?? '' );
+				$author_avatar = $person_author['term_id'] ? $person_author['avatar'] : (string) get_avatar_url( $post->post_author, array( 'size' => 96 ) );
 				$author_url    = ! empty( $person_author['url'] ) ? $person_author['url'] : (string) get_author_posts_url( $post->post_author );
 				$author_org    = ! empty( $person_author['organization'] ) ? $person_author['organization'] : '';
 				$author_score  = ! empty( $person_author['person_score'] ) ? (float) $person_author['person_score'] : 0.0;
@@ -1236,8 +1288,8 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 				if ( $raw_score > 5.0 ) {
 					$raw_score = round( $raw_score / 2, 1 );
 				}
-				$score_val     = $vote_summary['count'] ? max( 1.0, min( 5.0, $raw_score ) ) : 0.0;
-				$score_str     = $vote_summary['count'] ? number_format( $score_val, 1 ) : '—';
+				$score_val     = $raw_score > 0 ? max( 1.0, min( 5.0, $raw_score ) ) : 0.0;
+				$score_str     = $raw_score > 0 ? number_format( $score_val, 1 ) : '—';
 
 				$featured_quote = ! empty( $meta['featured_quote'] ) ? $meta['featured_quote'] : ( ! empty( $meta['analyst_quote'] ) ? $meta['analyst_quote'] : (string) wp_strip_all_tags( get_the_excerpt( $post ) ) );
 
@@ -1367,7 +1419,7 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 		 * @return array
 		 */
 		public static function normalize_media( $post ) {
-			$thumb_id  = get_post_thumbnail_id( $post );
+			$thumb_id  = 'person' === $post->post_type ? Revayat_Companion_Profile_Avatar::person_attachment( $post->ID ) : get_post_thumbnail_id( $post );
 			$has_media = ! empty( $thumb_id );
 
 			if ( $has_media ) {
@@ -1483,13 +1535,8 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 					$person_author['person_votes'] = $p_votes;
 					$person_author['analyses_count'] = (int) get_post_meta( $person_post->ID, '_revayat_person_analyses_count', true );
 					$person_author['url'] = (string) get_permalink( $person_post->ID );
-					$avatar_id                     = (int) get_post_meta( $person_post->ID, '_revayat_avatar_id', true );
-					if ( ! $avatar_id && has_post_thumbnail( $person_post->ID ) ) {
-						$avatar_id = get_post_thumbnail_id( $person_post->ID );
-					}
-					if ( $avatar_id ) {
-						$person_author['avatar'] = (string) wp_get_attachment_image_url( $avatar_id, 'thumbnail' );
-					}
+					$person_author['name'] = $person_post->post_title;
+					$person_author['avatar'] = Revayat_Companion_Profile_Avatar::person_url( $person_post->ID );
 				}
 			}
 
@@ -1497,7 +1544,7 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 			if ( empty( $person_author['name'] ) && ! empty( $post->post_author ) ) {
 				$author_id                     = (int) $post->post_author;
 				$person_author['name']         = (string) get_the_author_meta( 'display_name', $author_id );
-				$person_author['role']         = (string) ( get_the_author_meta( 'headline', $author_id ) ?: 'تحلیلگر اندیشکده' );
+				$person_author['role']         = (string) get_the_author_meta( 'headline', $author_id );
 				$person_author['avatar']       = (string) get_avatar_url( $author_id, array( 'size' => 96 ) );
 				$person_author['url']          = (string) get_author_posts_url( $author_id );
 				$person_author['organization'] = (string) ( get_the_author_meta( 'organization', $author_id ) ?: '' );

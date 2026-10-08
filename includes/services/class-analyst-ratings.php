@@ -6,6 +6,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 class Revayat_Companion_Analyst_Ratings {
+	const SEED_META = '_revayat_analyst_seed_score';
 	const SCORE_META = '_revayat_analyst_score';
 	const COUNT_META = '_revayat_analyst_votes';
 	const SUM_META   = '_revayat_analyst_vote_sum';
@@ -16,20 +17,27 @@ class Revayat_Companion_Analyst_Ratings {
 		$post_id = absint( $post_id );
 		$user_id = absint( $user_id );
 		$rating  = absint( $rating );
-		$lock    = '_revayat_vote_lock_' . $post_id;
-		$held_at = absint( get_option( $lock, 0 ) );
-		if ( $held_at && time() - $held_at > 15 ) {
-			delete_option( $lock );
+        if ( $rating < 1 || $rating > 5 || ! Revayat_Companion_Member_Policy::can_rate( $user_id, $post_id ) ) {
+            return new WP_Error( 'forbidden', 'امکان ثبت این رأی وجود ندارد.' );
+        }
+        return Revayat_Companion_Workflow_Lock::run( 'vote:' . $post_id, static function () use ( $post_id, $user_id, $rating ) {
+            update_user_meta( $user_id, '_revayat_vote_analyst_' . $post_id, $rating );
+            return self::rebuild_post( $post_id );
+        } );
+	}
+
+	/** Explicit, repeatable seeding; actual votes always take precedence. */
+	public static function seed_posts( $post_ids ) {
+		$created = 0;
+		foreach ( array_unique( array_map( 'absint', $post_ids ) ) as $post_id ) {
+			if ( 'analyst_post' !== get_post_type( $post_id ) || 'publish' !== get_post_status( $post_id ) ) { continue; }
+			if ( ! metadata_exists( 'post', $post_id, self::SEED_META ) ) {
+				add_post_meta( $post_id, self::SEED_META, wp_rand( 10, 50 ) / 10, true );
+				++$created;
+			}
+			self::rebuild_post( $post_id );
 		}
-		if ( ! add_option( $lock, time(), '', false ) ) {
-			return new WP_Error( 'vote_busy', 'ثبت رأی دیگری در حال انجام است؛ دوباره تلاش کنید.' );
-		}
-		try {
-			update_user_meta( $user_id, '_revayat_vote_analyst_' . $post_id, $rating );
-			return self::rebuild_post( $post_id );
-		} finally {
-			delete_option( $lock );
-		}
+		return $created;
 	}
 
 	public static function get_summary( $post_id, $rebuild_if_missing = true ) {
@@ -60,7 +68,8 @@ class Revayat_Companion_Analyst_Ratings {
 				++$count;
 			}
 		}
-		$average = $count ? round( $sum / $count, 1 ) : 0.0;
+		$seed = (float) get_post_meta( $post_id, self::SEED_META, true );
+		$average = $count ? round( $sum / $count, 1 ) : ( $seed >= 1 && $seed <= 5 ? $seed : 0.0 );
 		update_post_meta( $post_id, self::COUNT_META, $count );
 		update_post_meta( $post_id, self::SUM_META, $sum );
 		update_post_meta( $post_id, self::SCORE_META, $average );
@@ -94,6 +103,7 @@ class Revayat_Companion_Analyst_Ratings {
 			array(
 				'post_type'      => 'analyst_post',
 				'post_status'    => 'publish',
+				'has_password'   => false,
 				'posts_per_page' => -1,
 				'fields'         => 'ids',
 				'tax_query'      => array( array( 'taxonomy' => 'person_author', 'field' => 'term_id', 'terms' => array( (int) $term_id ) ) ),
@@ -105,7 +115,7 @@ class Revayat_Companion_Analyst_Ratings {
 		foreach ( $ids as $post_id ) {
 			$summary = self::get_summary( $post_id, false );
 			$votes  += $summary['count'];
-			if ( $summary['count'] > 0 ) {
+			if ( $summary['average'] > 0 ) {
 				$score_sum += $summary['average'];
 				++$scored;
 			}
@@ -141,8 +151,9 @@ class Revayat_Companion_Analyst_Ratings {
 			array(
 				'post_type'      => 'person',
 				'post_status'    => 'publish',
+				'has_password'   => false,
 				'posts_per_page' => -1,
-				'meta_key'       => '_revayat_person_votes',
+				'meta_key'       => '_revayat_person_total_score',
 				'meta_value'     => 0,
 				'meta_compare'   => '>',
 				'meta_type'      => 'NUMERIC',

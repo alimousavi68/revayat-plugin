@@ -43,6 +43,90 @@ class Revayat_Companion_User_Portal {
 		return $mobile;
 	}
 
+	/** وضعیت حساب؛ نبود متا برای سازگاری با حساب‌های قبلی به معنی فعال است. */
+	public static function get_account_status( $user_id ) {
+		$status = sanitize_key( get_user_meta( absint( $user_id ), '_revayat_account_status', true ) );
+		return 'suspended' === $status ? 'suspended' : 'active';
+	}
+
+	public static function is_account_active( $user_id ) {
+		return 'active' === self::get_account_status( $user_id );
+	}
+
+	/** یافتن حساب با شماره نرمال‌شده. */
+	public static function get_user_by_mobile( $mobile ) {
+		$mobile = self::normalize_mobile( $mobile );
+		if ( ! preg_match( '/^09\d{9}$/', $mobile ) ) {
+			return false;
+		}
+		$users = get_users(
+			array(
+				'meta_key'   => '_revayat_mobile',
+				'meta_value' => $mobile,
+				'number'     => 1,
+				'fields'     => 'all',
+			)
+		);
+		return $users ? $users[0] : false;
+	}
+
+	/** تبدیل شماره موبایل به نام کاربری داخلی برای ورود با رمز. */
+	public static function resolve_login_identifier( $login ) {
+		$mobile = self::normalize_mobile( $login );
+		$user   = preg_match( '/^09\d{9}$/', $mobile ) ? self::get_user_by_mobile( $mobile ) : false;
+		return $user instanceof WP_User ? $user->user_login : sanitize_text_field( $login );
+	}
+
+	/** ساخت حساب پایه پس از تأیید OTP با قفل کوتاه برای جلوگیری از حساب تکراری. */
+    public static function create_mobile_member( $mobile ) {
+        $mobile = self::normalize_mobile( $mobile );
+        return Revayat_Companion_Workflow_Lock::run( 'mobile-identity:' . $mobile, static function () use ( $mobile ) { return self::create_mobile_member_locked( $mobile ); } );
+    }
+    private static function create_mobile_member_locked( $mobile ) {
+		$mobile = self::normalize_mobile( $mobile );
+		if ( ! preg_match( '/^09\d{9}$/', $mobile ) ) {
+			return new WP_Error( 'invalid_mobile', 'شماره موبایل معتبر نیست.' );
+		}
+		$existing = self::get_user_by_mobile( $mobile );
+		if ( $existing instanceof WP_User ) {
+			return $existing;
+		}
+		$lock = '_revayat_mobile_create_' . hash_hmac( 'sha256', $mobile, wp_salt( 'auth' ) );
+		if ( ! add_option( $lock, time(), '', false ) ) {
+			return new WP_Error( 'account_creation_busy', 'ساخت حساب در حال انجام است؛ دوباره تلاش کنید.' );
+		}
+		try {
+			$existing = self::get_user_by_mobile( $mobile );
+			if ( $existing instanceof WP_User ) {
+				return $existing;
+			}
+			$base  = 'rv_' . substr( hash_hmac( 'sha256', $mobile, wp_salt( 'logged_in' ) ), 0, 14 );
+			$login = $base;
+			$index = 1;
+			while ( username_exists( $login ) ) {
+				$login = $base . '_' . $index++;
+			}
+			$user_id = wp_insert_user(
+				array(
+					'user_login'   => $login,
+					'user_pass'    => wp_generate_password( 32, true, true ),
+					'display_name' => 'عضو روایت ایران',
+					'role'         => 'subscriber',
+				)
+			);
+			if ( is_wp_error( $user_id ) ) {
+				return $user_id;
+			}
+			update_user_meta( $user_id, '_revayat_mobile', $mobile );
+			update_user_meta( $user_id, '_revayat_mobile_verified', 1 );
+			update_user_meta( $user_id, '_revayat_mobile_verified_at', current_time( 'mysql', true ) );
+			update_user_meta( $user_id, '_revayat_account_status', 'active' );
+			return get_user_by( 'id', $user_id );
+		} finally {
+			delete_option( $lock );
+		}
+	}
+
 	/** ثبت نقش‌ها و capabilityهای پروژه. */
 	public static function register_roles() {
 		add_role(
@@ -87,26 +171,54 @@ class Revayat_Companion_User_Portal {
 			: array( 'count' => 0, 'average' => 0.0, 'sum' => 0 );
 	}
 
-	/** ثبت یا تغییر رأی ارزیاب برای یادداشت منتشرشده. */
+	/** ثبت یا تغییر رأی ارزیاب برای یادداشت منتشرشده (پشتیبانی از فرم سنتی و ایجکس ۱-کلیک). */
 	public function handle_vote_analyst_post() {
-		if ( ! is_user_logged_in() || ! current_user_can( 'revayat_rate_analyst_post' ) ) {
-			wp_die( esc_html__( 'مجوز ارزیابی ندارید.', 'revayat-companion' ), '', array( 'response' => 403 ) );
-		}
 		$post_id = isset( $_POST['post_id'] ) ? absint( $_POST['post_id'] ) : 0;
-		check_admin_referer( 'revayat_vote_analyst_' . $post_id, 'revayat_vote_nonce' );
-		$post = get_post( $post_id );
+		$is_ajax = wp_doing_ajax();
+
+		if ( ! Revayat_Companion_Member_Policy::can_rate( get_current_user_id(), $post_id ) ) {
+			if ( $is_ajax ) {
+				wp_send_json_error( array( 'message' => esc_html__( 'امکان ثبت رأی برای این یادداشت وجود ندارد.', 'revayat-companion' ) ), 403 );
+			}
+			wp_die( esc_html__( 'امکان ثبت رأی برای این یادداشت وجود ندارد.', 'revayat-companion' ), '', array( 'response' => 403 ) );
+		}
+
+		if ( $is_ajax ) {
+			if ( ! check_ajax_referer( 'revayat_vote_analyst_' . $post_id, 'revayat_vote_nonce', false ) ) {
+				wp_send_json_error( array( 'message' => esc_html__( 'اعتبار نشست یا توکن امنیتی منقضی شده است.', 'revayat-companion' ) ), 403 );
+			}
+		} else {
+			check_admin_referer( 'revayat_vote_analyst_' . $post_id, 'revayat_vote_nonce' );
+		}
+
 		$rating = isset( $_POST['rating'] ) ? absint( $_POST['rating'] ) : 0;
-		if ( ! $post || 'analyst_post' !== $post->post_type || 'publish' !== $post->post_status || $rating < 1 || $rating > 5 ) {
-			wp_die( esc_html__( 'ارزیابی معتبر نیست.', 'revayat-companion' ), '', array( 'response' => 400 ) );
+		if ( $rating < 1 || $rating > 5 ) {
+			if ( $is_ajax ) {
+				wp_send_json_error( array( 'message' => esc_html__( 'امتیاز باید بین یک تا پنج باشد.', 'revayat-companion' ) ), 400 );
+			}
+			wp_die( 'امتیاز باید بین یک تا پنج باشد.', '', array( 'response' => 400 ) );
 		}
-		if ( (int) $post->post_author === get_current_user_id() ) {
-			wp_die( esc_html__( 'امکان ارزیابی یادداشت خودتان وجود ندارد.', 'revayat-companion' ), '', array( 'response' => 403 ) );
-		}
+
 		$result = Revayat_Companion_Analyst_Ratings::record_vote( $post_id, get_current_user_id(), $rating );
 		if ( is_wp_error( $result ) ) {
+			if ( $is_ajax ) {
+				wp_send_json_error( array( 'message' => esc_html( $result->get_error_message() ) ), 409 );
+			}
 			wp_die( esc_html( $result->get_error_message() ), '', array( 'response' => 409 ) );
 		}
-		wp_safe_redirect( add_query_arg( 'vote', 'saved', get_permalink( $post_id ) ) . '#analyst-vote' );
+
+		if ( $is_ajax ) {
+			$summary = Revayat_Companion_Analyst_Ratings::get_summary( $post_id );
+			wp_send_json_success( array(
+				'message' => esc_html__( 'امتیاز شما با موفقیت ثبت شد.', 'revayat-companion' ),
+				'rating'  => $rating,
+				'average' => $summary['average'],
+				'count'   => $summary['count'],
+				'score'   => $summary['average'] > 0 ? number_format( (float) $summary['average'], 1 ) : '—',
+			) );
+		}
+
+		wp_safe_redirect( add_query_arg( 'vote', 'saved', get_permalink( $post_id ) ) . '#engagement-panel' );
 		exit;
 	}
 
@@ -190,7 +302,7 @@ class Revayat_Companion_User_Portal {
 		if ( is_wp_error( $person_id ) ) {
 			return array();
 		}
-		$avatar_id = absint( get_post_meta( $person_id, '_revayat_avatar_id', true ) );
+		$avatar_id = Revayat_Companion_Profile_Avatar::person_attachment( $person_id );
 		$terms     = wp_get_object_terms( $person_id, 'analyst_field', array( 'fields' => 'ids' ) );
 		return array(
 			'person_id'    => $person_id,
@@ -200,7 +312,7 @@ class Revayat_Companion_User_Portal {
 			'expertise'    => (string) get_post_meta( $person_id, '_revayat_expertise', true ),
 			'bio'          => (string) get_post_field( 'post_content', $person_id ),
 			'avatar_id'    => $avatar_id,
-			'avatar_url'   => $avatar_id ? (string) wp_get_attachment_image_url( $avatar_id, 'revayat-avatar' ) : '',
+			'avatar_url'   => Revayat_Companion_Profile_Avatar::person_url( $person_id ),
 			'field_id'     => ( ! is_wp_error( $terms ) && $terms ) ? (int) $terms[0] : 0,
 		);
 	}
@@ -275,15 +387,49 @@ class Revayat_Companion_User_Portal {
 		if ( ! isset( $_POST['revayat_login_nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['revayat_login_nonce'] ) ), 'revayat_login' ) ) {
 			$this->redirect_auth( 'invalid_nonce' );
 		}
-		$login    = isset( $_POST['login'] ) ? sanitize_text_field( wp_unslash( $_POST['login'] ) ) : '';
+		$login    = isset( $_POST['login'] ) ? self::resolve_login_identifier( wp_unslash( $_POST['login'] ) ) : '';
 		$password = isset( $_POST['password'] ) ? (string) wp_unslash( $_POST['password'] ) : '';
 		$user     = wp_signon( array( 'user_login' => $login, 'user_password' => $password, 'remember' => ! empty( $_POST['remember'] ) ), is_ssl() );
 		if ( is_wp_error( $user ) ) {
-			$this->redirect_auth( 'login_failed' );
+			$this->redirect_auth( 'account_suspended' === $user->get_error_code() ? 'account_suspended' : 'login_failed', 'password' );
 		}
 		$requested_redirect = isset( $_POST['redirect_to'] ) ? wp_unslash( $_POST['redirect_to'] ) : '';
 		$redirect_to        = wp_validate_redirect( $requested_redirect, home_url( '/dashboard/' ) );
 		wp_safe_redirect( $redirect_to );
+		exit;
+	}
+
+	/** ورود یا ساخت حساب عادی پس از تأیید کد یک‌بارمصرف. */
+	public function handle_otp_auth() {
+		if ( ! isset( $_POST['revayat_otp_auth_nonce'] ) || ! wp_verify_nonce( sanitize_text_field( wp_unslash( $_POST['revayat_otp_auth_nonce'] ) ), 'revayat_otp_auth' ) ) {
+			$this->redirect_auth( 'invalid_nonce' );
+		}
+		$mobile = self::normalize_mobile( isset( $_POST['mobile'] ) ? wp_unslash( $_POST['mobile'] ) : '' );
+		$otp    = isset( $_POST['otp_code'] ) ? preg_replace( '/\D+/', '', Revayat_Companion_OTP_Service::digits( wp_unslash( $_POST['otp_code'] ) ) ) : '';
+		if ( ! preg_match( '/^09\d{9}$/', $mobile ) ) {
+			$this->redirect_auth( 'invalid_mobile', 'login' );
+		}
+		$verified = Revayat_Companion_OTP_Service::verify( $mobile, $otp, 'auth' );
+		if ( is_wp_error( $verified ) ) {
+			$this->redirect_auth( $verified->get_error_code(), 'login', array( 'mobile' => $mobile ) );
+		}
+		$user = self::get_user_by_mobile( $mobile );
+		if ( ! $user ) {
+			$user = self::create_mobile_member( $mobile );
+		}
+		if ( is_wp_error( $user ) || ! $user instanceof WP_User ) {
+			$this->redirect_auth( 'registration_failed', 'login', array( 'mobile' => $mobile ) );
+		}
+		if ( ! self::is_account_active( $user->ID ) ) {
+			$this->redirect_auth( 'account_suspended', 'login' );
+		}
+		update_user_meta( $user->ID, '_revayat_mobile_verified', 1 );
+		update_user_meta( $user->ID, '_revayat_mobile_verified_at', current_time( 'mysql', true ) );
+		wp_set_current_user( $user->ID );
+		wp_set_auth_cookie( $user->ID, ! empty( $_POST['remember'] ), is_ssl() );
+		do_action( 'wp_login', $user->user_login, $user );
+		$requested_redirect = isset( $_POST['redirect_to'] ) ? wp_unslash( $_POST['redirect_to'] ) : '';
+		wp_safe_redirect( wp_validate_redirect( $requested_redirect, home_url( '/dashboard/' ) ) );
 		exit;
 	}
 
@@ -302,18 +448,9 @@ class Revayat_Companion_User_Portal {
 
 	/** ثبت درخواست دسترسی ویژه توسط کاربر واردشده. */
 	public function handle_request_special_access() {
-		if ( ! is_user_logged_in() || ! current_user_can( 'read' ) ) {
-			wp_die( esc_html__( 'برای ثبت درخواست باید وارد حساب شوید.', 'revayat-companion' ), '', array( 'response' => 403 ) );
-		}
-		check_admin_referer( 'revayat_request_special_access', 'revayat_special_access_nonce' );
-		$user_id = get_current_user_id();
-		if ( current_user_can( 'revayat_read_situation_room' ) || current_user_can( 'manage_options' ) ) {
-			$this->redirect_dashboard( 'special_access_already_active' );
-		}
-		update_user_meta( $user_id, '_revayat_special_access_status', 'pending' );
-		update_user_meta( $user_id, '_revayat_special_access_requested_at', current_time( 'mysql', true ) );
-		$this->redirect_dashboard( 'special_access_requested' );
-	}
+        if ( ! is_user_logged_in() ) { auth_redirect(); }
+        wp_safe_redirect( home_url( '/dashboard/?view=situation-access' ) ); exit;
+    }
 
 	/** ثبت درخواست عضویت تحلیلگر؛ حساب تا تایید مدیر subscriber باقی می‌ماند. */
 	public function handle_register() {
@@ -324,7 +461,7 @@ class Revayat_Companion_User_Portal {
 		$email    = isset( $_POST['email'] ) ? sanitize_email( wp_unslash( $_POST['email'] ) ) : '';
 		$password = isset( $_POST['password'] ) ? (string) wp_unslash( $_POST['password'] ) : '';
 		$mobile   = self::normalize_mobile( isset( $_POST['mobile'] ) ? wp_unslash( $_POST['mobile'] ) : '' );
-		$otp      = isset( $_POST['otp_code'] ) ? preg_replace( '/\D+/', '', wp_unslash( $_POST['otp_code'] ) ) : '';
+		$otp      = isset( $_POST['otp_code'] ) ? preg_replace( '/\D+/', '', Revayat_Companion_OTP_Service::digits( wp_unslash( $_POST['otp_code'] ) ) ) : '';
 		$requested_role = isset( $_POST['requested_role'] ) ? sanitize_key( wp_unslash( $_POST['requested_role'] ) ) : 'analyst';
 		if ( ! $name || ! is_email( $email ) || strlen( $password ) < 8 ) {
 			$this->redirect_auth( 'invalid_registration', 'register' );
@@ -361,6 +498,7 @@ class Revayat_Companion_User_Portal {
 		update_user_meta( $user_id, '_revayat_mobile', $mobile );
 		update_user_meta( $user_id, '_revayat_mobile_verified', 1 );
 		update_user_meta( $user_id, '_revayat_mobile_verified_at', current_time( 'mysql', true ) );
+		do_action( 'revayat_access_status_changed', $user_id, 'عضویت تحلیلگری', 'pending', wp_generate_uuid4() );
 		$this->redirect_auth( 'registration_pending', 'login' );
 	}
 
@@ -370,14 +508,61 @@ class Revayat_Companion_User_Portal {
 			$this->redirect_auth( 'invalid_nonce', 'register' );
 		}
 		$mobile  = self::normalize_mobile( isset( $_POST['mobile'] ) ? wp_unslash( $_POST['mobile'] ) : '' );
-		$context = isset( $_POST['otp_context'] ) ? sanitize_key( wp_unslash( $_POST['otp_context'] ) ) : 'register';
-		$tab     = 'recover' === $context ? 'recover' : 'register';
+		$context = isset( $_POST['otp_context'] ) ? sanitize_key( wp_unslash( $_POST['otp_context'] ) ) : 'auth';
+		$context = 'recover' === $context ? 'recover' : 'auth';
+		$tab     = 'recover' === $context ? 'recover' : 'login';
 		$result  = Revayat_Companion_OTP_Service::request( $mobile, $context );
 		$notice  = is_wp_error( $result ) ? $result->get_error_code() : 'otp_sent';
 		if ( is_wp_error( $result ) && ! in_array( $notice, array( 'invalid_mobile', 'otp_rate_limited', 'otp_gateway_unconfigured', 'otp_gateway_rejected', 'invalid_otp_gateway' ), true ) ) {
 			$notice = 'otp_send_failed';
 		}
-		$this->redirect_auth( $notice, $tab, array( 'mobile' => $mobile ) );
+		$extra = array( 'mobile' => $mobile );
+		if ( ! empty( $_POST['redirect_to'] ) ) {
+			$extra['redirect_to'] = wp_validate_redirect( wp_unslash( $_POST['redirect_to'] ), '' );
+		}
+		$this->redirect_auth( $notice, $tab, $extra );
+	}
+
+	/** تعیین یا تغییر رمز اختیاری از داشبورد. */
+	public function handle_set_password() {
+		if ( ! is_user_logged_in() || ! current_user_can( 'read' ) ) {
+			wp_die( esc_html__( 'دسترسی غیرمجاز است.', 'revayat-companion' ), '', array( 'response' => 403 ) );
+		}
+		check_admin_referer( 'revayat_set_password', 'revayat_password_nonce' );
+		$password = isset( $_POST['password'] ) ? (string) wp_unslash( $_POST['password'] ) : '';
+		$confirm  = isset( $_POST['password_confirm'] ) ? (string) wp_unslash( $_POST['password_confirm'] ) : '';
+		if ( strlen( $password ) < 8 || $password !== $confirm ) {
+			$this->redirect_dashboard( 'invalid_password' );
+		}
+		$user_id = get_current_user_id();
+		wp_set_password( $password, $user_id );
+		wp_set_current_user( $user_id );
+		wp_set_auth_cookie( $user_id, true, is_ssl() );
+		update_user_meta( $user_id, '_revayat_password_enabled', 1 );
+		$this->redirect_dashboard( 'password_updated' );
+	}
+
+	/** جلوگیری از ورود حساب معلق در تمام مسیرهای احراز هویت وردپرس. */
+	public function prevent_suspended_authentication( $user ) {
+		if ( $user instanceof WP_User && ! self::is_account_active( $user->ID ) ) {
+			return new WP_Error( 'account_suspended', 'این حساب موقتاً غیرفعال است.' );
+		}
+		return $user;
+	}
+
+	/** نشست حسابی که بعداً معلق شده نیز ادامه پیدا نکند. */
+	public function enforce_active_session() {
+		if ( is_user_logged_in() && ! self::is_account_active( get_current_user_id() ) ) {
+			wp_logout();
+			if ( wp_doing_ajax() ) {
+				wp_send_json_error( array( 'message' => 'این حساب موقتاً غیرفعال است.' ), 403 );
+			}
+			if ( wp_doing_cron() || ( defined( 'REST_REQUEST' ) && REST_REQUEST ) || ( defined( 'XMLRPC_REQUEST' ) && XMLRPC_REQUEST ) ) {
+				return;
+			}
+			wp_safe_redirect( add_query_arg( array( 'tab' => 'login', 'notice' => 'account_suspended' ), home_url( '/auth/' ) ) );
+			exit;
+		}
 	}
 
 	/** بازیابی رمز با موبایل تأییدشده و OTP یک‌بارمصرف. */
@@ -386,7 +571,7 @@ class Revayat_Companion_User_Portal {
 			$this->redirect_auth( 'invalid_nonce', 'recover' );
 		}
 		$mobile   = self::normalize_mobile( isset( $_POST['mobile'] ) ? wp_unslash( $_POST['mobile'] ) : '' );
-		$otp      = isset( $_POST['otp_code'] ) ? preg_replace( '/\D+/', '', wp_unslash( $_POST['otp_code'] ) ) : '';
+		$otp      = isset( $_POST['otp_code'] ) ? preg_replace( '/\D+/', '', Revayat_Companion_OTP_Service::digits( wp_unslash( $_POST['otp_code'] ) ) ) : '';
 		$password = isset( $_POST['password'] ) ? (string) wp_unslash( $_POST['password'] ) : '';
 		if ( strlen( $password ) < 8 ) {
 			$this->redirect_auth( 'invalid_password', 'recover', array( 'mobile' => $mobile ) );
@@ -405,58 +590,9 @@ class Revayat_Companion_User_Portal {
 
 	/** ثبت یادداشت تحلیلگر در صف بررسی تحریریه. */
 	public function handle_submit_analyst_post() {
-		if ( ! is_user_logged_in() || ! current_user_can( 'revayat_submit_analyst_post' ) ) {
-			wp_die( esc_html__( 'شما اجازه ارسال یادداشت ندارید.', 'revayat-companion' ), '', array( 'response' => 403 ) );
-		}
-		check_admin_referer( 'revayat_submit_analyst_post', 'revayat_submit_nonce' );
-		$user_id = get_current_user_id();
-		$post_id = isset( $_POST['post_id'] ) ? absint( $_POST['post_id'] ) : 0;
-		$mode    = isset( $_POST['submission_mode'] ) ? sanitize_key( wp_unslash( $_POST['submission_mode'] ) ) : 'submit';
-		$status  = 'draft' === $mode ? 'draft' : 'pending';
-		$title   = isset( $_POST['post_title'] ) ? sanitize_text_field( wp_unslash( $_POST['post_title'] ) ) : '';
-		$content = isset( $_POST['post_content'] ) ? wp_kses_post( wp_unslash( $_POST['post_content'] ) ) : '';
-		$excerpt = isset( $_POST['post_excerpt'] ) ? sanitize_textarea_field( wp_unslash( $_POST['post_excerpt'] ) ) : '';
-		$min_content = 'draft' === $status ? 1 : 50;
-		if ( mb_strlen( $title ) < 5 || mb_strlen( wp_strip_all_tags( $content ) ) < $min_content ) {
-			$this->redirect_dashboard( 'invalid_post' );
-		}
-
-		$post_data = array(
-				'post_type'    => 'analyst_post',
-				'post_status'  => $status,
-				'post_author'  => $user_id,
-				'post_title'   => $title,
-				'post_content' => $content,
-				'post_excerpt' => $excerpt,
-			);
-
-		if ( $post_id ) {
-			$existing = get_post( $post_id );
-			$review_status = $existing ? (string) get_post_meta( $existing->ID, '_revayat_review_status', true ) : '';
-			if ( ! $existing || 'analyst_post' !== $existing->post_type || (int) $existing->post_author !== $user_id || 'draft' !== $existing->post_status || ! in_array( $review_status, array( 'draft', 'changes_requested' ), true ) ) {
-				wp_die( esc_html__( 'امکان ویرایش این یادداشت وجود ندارد.', 'revayat-companion' ), '', array( 'response' => 403 ) );
-			}
-			$post_data['ID'] = $post_id;
-			$result = wp_update_post( $post_data, true );
-		} else {
-			$result = wp_insert_post( $post_data, true );
-		}
-		if ( ! is_wp_error( $result ) ) {
-			$current_review = (string) get_post_meta( $result, '_revayat_review_status', true );
-			if ( 'pending' === $status ) {
-				update_post_meta( $result, '_revayat_review_status', 'pending' );
-			} elseif ( 'changes_requested' !== $current_review ) {
-				update_post_meta( $result, '_revayat_review_status', 'draft' );
-			}
-			if ( class_exists( 'Revayat_Companion_Person_Identity' ) ) {
-				$assigned = Revayat_Companion_Person_Identity::assign_submission( $result, $user_id );
-				if ( is_wp_error( $assigned ) ) {
-					$this->redirect_dashboard( 'profile_link_failed' );
-				}
-			}
-		}
-		$this->redirect_dashboard( is_wp_error( $result ) ? 'submit_failed' : ( 'draft' === $status ? 'saved' : 'submitted' ) );
-	}
+        if ( ! is_user_logged_in() ) { auth_redirect(); }
+        wp_safe_redirect( home_url( '/dashboard/?view=note-edit' ) ); exit;
+    }
 
 	/** داده یک یادداشت قابل ویرایش متعلق به کاربر. */
 	public static function get_editable_submission( $post_id, $user_id ) {
@@ -727,6 +863,7 @@ class Revayat_Companion_User_Portal {
 		if ( $previous_status !== $status ) {
 			self::add_editorial_notification( $post, $status );
 			self::send_editorial_email( $post, $status, $note );
+			do_action( 'revayat_analyst_post_status_changed', $post_id, $status, wp_generate_uuid4() );
 		}
 	}
 
@@ -766,25 +903,8 @@ class Revayat_Companion_User_Portal {
 			wp_set_object_terms( $person_id, array(), 'analyst_field', false );
 		}
 
-		if ( isset( $_FILES['profile_avatar'] ) && UPLOAD_ERR_NO_FILE !== (int) $_FILES['profile_avatar']['error'] ) {
-			$file = $_FILES['profile_avatar'];
-			if ( UPLOAD_ERR_OK !== (int) $file['error'] || (int) $file['size'] > 2 * MB_IN_BYTES ) {
-				$this->redirect_dashboard( 'avatar_invalid' );
-			}
-			require_once ABSPATH . 'wp-admin/includes/file.php';
-			require_once ABSPATH . 'wp-admin/includes/media.php';
-			require_once ABSPATH . 'wp-admin/includes/image.php';
-			$attachment_id = media_handle_upload(
-				'profile_avatar',
-				$person_id,
-				array( 'post_title' => $display_name ),
-				array( 'test_form' => false, 'mimes' => array( 'jpg|jpeg' => 'image/jpeg', 'png' => 'image/png', 'webp' => 'image/webp' ) )
-			);
-			if ( is_wp_error( $attachment_id ) ) {
-				$this->redirect_dashboard( 'avatar_invalid' );
-			}
-			update_post_meta( $person_id, '_revayat_avatar_id', (int) $attachment_id );
-			set_post_thumbnail( $person_id, (int) $attachment_id );
+		if ( is_wp_error( Revayat_Companion_Profile_Avatar::upload( $user_id ) ) ) {
+			$this->redirect_dashboard( 'avatar_invalid' );
 		}
 		$this->redirect_dashboard( 'profile_updated' );
 	}
@@ -849,11 +969,13 @@ class Revayat_Companion_User_Portal {
 
 	/** اعمال تصمیم مدیر به‌صورت مستقل از نقش اصلی کاربر. */
 	public static function review_special_access( $user_id, $decision ) {
+        if ( Revayat_Companion_Member_Applications::latest( $user_id, 'situation' ) ) { return new WP_Error( 'new_workflow', 'این درخواست را از صفحه درخواست‌های اعضا بررسی کنید.' ); }
 		$user     = get_user_by( 'id', absint( $user_id ) );
 		$decision = sanitize_key( $decision );
 		if ( ! $user || ! in_array( $decision, array( 'approve', 'reject' ), true ) ) {
 			return new WP_Error( 'invalid_special_access_request', 'درخواست معتبر نیست.' );
 		}
+		$previous = get_user_meta( $user->ID, '_revayat_special_access_status', true );
 		if ( 'approve' === $decision ) {
 			$user->add_cap( 'revayat_read_situation_room', true );
 			update_user_meta( $user->ID, '_revayat_special_access_status', 'approved' );
@@ -862,6 +984,8 @@ class Revayat_Companion_User_Portal {
 			update_user_meta( $user->ID, '_revayat_special_access_status', 'rejected' );
 		}
 		update_user_meta( $user->ID, '_revayat_special_access_reviewed_at', current_time( 'mysql', true ) );
+		$status = 'approve' === $decision ? 'approved' : 'rejected';
+		if ( $previous !== $status ) { do_action( 'revayat_access_status_changed', $user->ID, 'اتاق وضعیت', $status, wp_generate_uuid4() ); }
 		return true;
 	}
 
@@ -988,6 +1112,7 @@ class Revayat_Companion_User_Portal {
 		$history   = is_array( $history ) ? $history : array();
 		$history[] = array( 'decision' => $decision, 'role' => $requested_role, 'reviewer' => absint( $reviewer_id ), 'created_at' => current_time( 'mysql', true ) );
 		update_user_meta( $user->ID, '_revayat_approval_history', array_slice( $history, -20 ) );
+		do_action( 'revayat_access_status_changed', $user->ID, 'analyst' === $requested_role ? 'تحلیلگری' : 'عضویت', 'approve' === $decision ? 'approved' : 'rejected', wp_generate_uuid4() );
 		return true;
 	}
 
@@ -1034,7 +1159,9 @@ class Revayat_Companion_User_Portal {
 	}
 
 	private function redirect_dashboard( $notice ) {
-		wp_safe_redirect( add_query_arg( 'notice', sanitize_key( $notice ), home_url( '/dashboard/' ) ) );
+
+        $view = in_array( $notice, array( 'password_updated', 'invalid_password' ), true ) ? 'security' : ( 'notifications_read' === $notice ? 'notifications' : 'overview' );
+        wp_safe_redirect( add_query_arg( array( 'notice' => sanitize_key( $notice ), 'view' => $view ), home_url( '/dashboard/' ) ) );
 		exit;
 	}
 }

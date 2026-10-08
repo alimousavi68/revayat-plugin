@@ -169,6 +169,11 @@ if ( ! class_exists( 'Revayat_Companion_Homepage_Provider' ) ) {
 			);
 		}
 
+		/** تیترهای عمومی و بدون پیوند اتاق وضعیت برای نمای گیت‌شده صفحه اصلی. */
+		public static function get_situation_room_teasers() {
+			return Revayat_Companion_Content_Service::get_situation_room_teasers( 4 );
+		}
+
 		/**
 		 * تامین داده‌های سکشن رصد اخبار (News Monitoring)
 		 *
@@ -300,6 +305,10 @@ if ( ! class_exists( 'Revayat_Data_Service' ) ) {
 			return Revayat_Companion_Homepage_Provider::get_situation_room_data();
 		}
 
+		public static function get_situation_room_teasers() {
+			return Revayat_Companion_Homepage_Provider::get_situation_room_teasers();
+		}
+
 		public static function get_news_monitoring_data() {
 			return Revayat_Companion_Homepage_Provider::get_news_monitoring_data();
 		}
@@ -373,6 +382,14 @@ if ( ! class_exists( 'Revayat_Data_Service' ) ) {
 				}
 			}
 			return $items;
+		}
+
+		public static function get_person_posts( $person_id, $page = 1 ): array {
+			return Revayat_Companion_Content_Service::get_person_posts( $person_id, $page );
+		}
+
+		public static function get_person_avatar_url( $person_id ): string {
+			return Revayat_Companion_Profile_Avatar::person_url( $person_id );
 		}
 
 		public static function get_person_contributor_slug( $person_id ): string {
