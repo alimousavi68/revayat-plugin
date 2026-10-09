@@ -220,6 +220,10 @@ if ( ! class_exists( 'Revayat_Companion_Plugin' ) ) {
 		 */
 		private function define_public_hooks() {
 			$this->loader->add_filter( 'image_editor_output_format', 'Revayat_Companion_Media_Performance', 'prefer_webp_for_jpeg' );
+            $this->loader->add_filter('wp_editor_set_quality', 'Revayat_Companion_Media_Performance', 'quality', 10, 2);
+            $this->loader->add_filter('wp_generate_attachment_metadata', 'Revayat_Companion_Media_Performance', 'ensure_web_full', 20, 2);
+            $this->loader->add_filter('wp_calculate_image_srcset', 'Revayat_Companion_Media_Performance', 'web_srcset', 10, 5);
+            $this->loader->add_filter('image_downsize', 'Revayat_Companion_Media_Performance', 'small_image_fallback', 10, 3);
 			$this->loader->add_action( 'rest_api_init', 'Revayat_Companion_Content_Service', 'register_rest_routes' );
 			$this->loader->add_action( 'template_redirect', 'Revayat_Companion_Person_Identity', 'redirect_author_archive_to_person', 0 );
 			$this->loader->add_action( 'template_redirect', 'Revayat_Companion_Content_Service', 'enforce_situation_room_route', 0 );

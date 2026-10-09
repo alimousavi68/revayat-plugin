@@ -109,7 +109,37 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 		}
 
 		/** پیش‌بارگذاری term meta رابطه اشخاص برای جلوگیری از کوئری کارت‌به‌کارت. */
+        /** Prime missing card relationships in one query, including legacy assignments.
+         * Some old content has terms from taxonomies no longer registered for its type.
+         * Preserve those values rather than treating unrelated taxonomies as empty.
+         */
+        private static function prime_card_term_relationships(array $posts): void {
+            $taxonomies = ['editorial_placement', 'news_source', 'security_level', 'observatory_badge', 'media_format', 'dossier_topic', 'analyst_field'];
+            $missing = [];
+            foreach ($posts as $post) {
+                foreach ($taxonomies as $taxonomy) {
+                    if (taxonomy_exists($taxonomy) && false === wp_cache_get($post->ID, $taxonomy . '_relationships')) {
+                        $missing[$taxonomy][(int) $post->ID] = [];
+                    }
+                }
+            }
+            if (!$missing) { return; }
+            $ids = [];
+            foreach ($missing as $objects) { $ids = array_merge($ids, array_keys($objects)); }
+            $terms = wp_get_object_terms(array_values(array_unique($ids)), array_keys($missing), ['fields' => 'all_with_object_id']);
+            if (is_wp_error($terms)) { return; }
+            foreach ($terms as $term) {
+                if (isset($missing[$term->taxonomy][(int) $term->object_id])) {
+                    $missing[$term->taxonomy][(int) $term->object_id][] = (int) $term->term_id;
+                }
+            }
+            foreach ($missing as $taxonomy => $objects) {
+                foreach ($objects as $id => $term_ids) { wp_cache_add($id, $term_ids, $taxonomy . '_relationships'); }
+            }
+        }
+
 		private static function prime_person_term_meta( $posts ) {
+            self::prime_card_term_relationships($posts);
 			if ( ! taxonomy_exists( 'person_author' ) || ! $posts ) {
 				return;
 			}
@@ -1445,6 +1475,13 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 			);
 		}
 
+        /** Use the term relationship cache primed by WP_Query within this request. */
+        private static function cached_post_terms(int $post_id, string $taxonomy, string $field = '') {
+            $terms = get_the_terms($post_id, $taxonomy);
+            if (is_wp_error($terms) || !$terms) { return []; }
+            return $field ? wp_list_pluck($terms, $field) : $terms;
+        }
+
 		/**
 		 * نرمال‌سازی اطلاعات تاکسونومی‌های مرتبط با پست
 		 *
@@ -1455,7 +1492,7 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 			$id = (int) $post->ID;
 
 			// ۱. جایگاه تحریریه
-			$placement_terms = wp_get_object_terms( $id, 'editorial_placement', array( 'fields' => 'slugs' ) );
+			$placement_terms = self::cached_post_terms( $id, 'editorial_placement', 'slug' );
 			$placement       = ( ! empty( $placement_terms ) && ! is_wp_error( $placement_terms ) ) ? $placement_terms[0] : '';
 
 			// ۲. دسته‌بندی موضوعی
@@ -1474,11 +1511,11 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 			}
 
 			// ۳. منبع خبری
-			$source_terms = wp_get_object_terms( $id, 'news_source', array( 'fields' => 'names' ) );
+			$source_terms = self::cached_post_terms( $id, 'news_source', 'name' );
 			$news_source  = ( ! empty( $source_terms ) && ! is_wp_error( $source_terms ) ) ? $source_terms[0] : '';
 
 			// ۴. سطح امنیت
-			$sec_terms            = wp_get_object_terms( $id, 'security_level' );
+			$sec_terms            = self::cached_post_terms( $id, 'security_level' );
 			$security_level       = 'public';
 			$sec_label_map        = array(
 				'classified' => 'طبقه‌بندی‌شده (سطح ۱)',
@@ -1551,7 +1588,7 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 			}
 
 			// ۶. گونه واکاوی دیده‌بان
-			$obs_terms               = wp_get_object_terms( $id, 'observatory_badge' );
+			$obs_terms               = self::cached_post_terms( $id, 'observatory_badge' );
 			$observatory_badge       = '';
 			$observatory_badge_label = '';
 			$observatory_badge_css   = '';
@@ -1575,15 +1612,15 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 			}
 
 			// ۷. قالب رسانه
-			$fmt_terms    = wp_get_object_terms( $id, 'media_format', array( 'fields' => 'slugs' ) );
+			$fmt_terms    = self::cached_post_terms( $id, 'media_format', 'slug' );
 			$media_format = ( ! empty( $fmt_terms ) && ! is_wp_error( $fmt_terms ) ) ? $fmt_terms[0] : 'video';
 
 			// ۸. محور پرونده
-			$dossier_terms = wp_get_object_terms( $id, 'dossier_topic', array( 'fields' => 'names' ) );
+			$dossier_terms = self::cached_post_terms( $id, 'dossier_topic', 'name' );
 			$dossier_topic = ( ! empty( $dossier_terms ) && ! is_wp_error( $dossier_terms ) ) ? $dossier_terms[0] : '';
 
 			// ۹. رشته تخصصی تحلیلگر
-			$field_terms        = wp_get_object_terms( $id, 'analyst_field' );
+			$field_terms        = self::cached_post_terms( $id, 'analyst_field' );
 			$analyst_field      = '';
 			$analyst_field_slug = '';
 			$analyst_field_url  = '';
