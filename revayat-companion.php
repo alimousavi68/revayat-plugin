@@ -12,7 +12,7 @@
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       revayat-companion
  * Domain Path:       /languages
- *
+ * 
  * چرا این فایل لازم است؟
  * این فایل نقطه ورود (Entry Point) و فایل اصلی افزونه وردپرس است که توسط هسته وردپرس شناسایی و بارگذاری می‌شود.
  *
