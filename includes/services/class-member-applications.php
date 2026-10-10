@@ -30,7 +30,7 @@ class Revayat_Companion_Member_Applications {
 				self::transition( $post, 'withdrawn', $user_id, 'انصراف متقاضی' ); return array( 'message' => 'انصراف ثبت شد.', 'reload' => true );
 			}
 			if ( in_array( $state, array( 'pending', 'approved' ), true ) ) { return new WP_Error( 'invalid_state', 'این درخواست در حال بررسی است یا قبلاً تأیید شده است.' ); }
-			if ( 'situation' === $type && ! Revayat_Companion_Private_Documents::ready() ) { return new WP_Error( 'documents_unavailable', 'دریافت مدارک پس از تعیین سیاست نگهداری و آماده‌شدن فضای خصوصی فعال می‌شود.' ); }
+			if ( 'situation' === $type && ! Revayat_Companion_Private_Documents::ready() ) { return new WP_Error( 'documents_unavailable', 'ارسال درخواست دسترسی به اتاق وضعیت فعلاً در دسترس نیست. لطفاً بعداً مراجعه کنید.' ); }
 			$data = array();
 			foreach ( array( 'full_name', 'role_title', 'organization', 'expertise', 'bio', 'sample_url', 'reason' ) as $field ) { $data[ $field ] = sanitize_textarea_field( $input[ $field ] ?? '' ); if ( mb_strlen( $data[ $field ] ) > ( 'bio' === $field ? 3000 : 500 ) ) { return new WP_Error( 'too_long', 'طول یکی از فیلدها بیش از حد مجاز است.' ); } }
 			$data['sample_url'] = esc_url_raw( $data['sample_url'], array( 'http', 'https' ) );

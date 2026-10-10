@@ -2,16 +2,46 @@
 /** Documents never enter the public attachment library. Fail closed until configured. */
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 class Revayat_Companion_Private_Documents {
-	public static function directory() {
-		$path = defined( 'REVAYAT_PRIVATE_STORAGE_PATH' ) ? REVAYAT_PRIVATE_STORAGE_PATH : get_option( 'revayat_private_storage_path', '' );
-		$real = $path ? realpath( $path ) : false;
-		if ( ! $real || ! is_dir( $real ) || ! is_writable( $real ) ) { return ''; }
-		foreach ( array( realpath( ABSPATH ), ! empty( $_SERVER['DOCUMENT_ROOT'] ) ? realpath( $_SERVER['DOCUMENT_ROOT'] ) : false ) as $public ) {
-			if ( $public && ( $real === $public || 0 === strpos( $real . '/', trailingslashit( $public ) ) ) ) { return ''; }
+	/** Resolve existing ancestors before creating anything, including symlink targets. */
+	public static function check_directory( $path = null, $create = false ) {
+		if ( null === $path ) { $path = defined( 'REVAYAT_PRIVATE_STORAGE_PATH' ) ? REVAYAT_PRIVATE_STORAGE_PATH : get_option( 'revayat_private_storage_path', '' ); }
+		$path = wp_normalize_path( trim( (string) $path ) );
+		if ( '' === $path ) { return new WP_Error( 'storage_missing', 'مسیر پوشه خصوصی هنوز تعیین نشده است.' ); }
+		if ( preg_match( '/[\x00-\x1F\x7F]/', $path ) || ! preg_match( '#^(?:/|[A-Za-z]:/)#', $path ) || preg_match( '#(?:^|/)\.{1,2}(?:/|$)#', $path ) ) { return new WP_Error( 'storage_path', 'مسیر مطلق و کامل پوشه را بدون بخش‌های . یا .. وارد کنید.' ); }
+		$ancestor = $path; $suffix = '';
+		while ( ! file_exists( $ancestor ) && ! is_link( $ancestor ) ) {
+			$parent = dirname( $ancestor );
+			if ( $parent === $ancestor ) { return new WP_Error( 'storage_path', 'ریشه مسیر واردشده قابل دسترسی نیست.' ); }
+			$suffix = '/' . basename( $ancestor ) . $suffix; $ancestor = $parent;
 		}
+		$base = realpath( $ancestor );
+		if ( ! $base || ! is_dir( $base ) ) { return new WP_Error( 'storage_path', 'مسیر واردشده یا یکی از والدهای آن پوشه معتبر نیست.' ); }
+		$real = untrailingslashit( wp_normalize_path( $base ) ) . $suffix;
+		if ( '' === $real || preg_match( '#^[A-Za-z]:$#', $real ) ) { return new WP_Error( 'storage_root', 'ریشه سیستم را انتخاب نکنید؛ یک پوشه اختصاصی برای مدارک مشخص کنید.' ); }
+		foreach ( array( realpath( ABSPATH ), ! empty( $_SERVER['DOCUMENT_ROOT'] ) ? realpath( $_SERVER['DOCUMENT_ROOT'] ) : false ) as $public ) {
+			$public = $public ? untrailingslashit( wp_normalize_path( $public ) ) : false;
+			if ( false !== $public && ( $real === $public || 0 === strpos( $real . '/', trailingslashit( $public ) ) ) ) { return new WP_Error( 'storage_public', 'پوشه مدارک باید خارج از ریشه عمومی وب باشد؛ داخل وردپرس یا public_html قابل قبول نیست.' ); }
+		}
+		if ( ! is_dir( $path ) && $create ) {
+			if ( ! @mkdir( $path, 0700, true ) && ! is_dir( $path ) ) { return new WP_Error( 'storage_create', 'ساخت خودکار پوشه انجام نشد. پوشه را دستی ایجاد کنید و مالکیت یا دسترسی نوشتن را برای کاربر PHP تنظیم کنید؛ دسترسی ۷۷۷ لازم نیست.' ); }
+			clearstatcache( true, $path );
+			// Recheck the created path against the same public-root restrictions.
+			return self::check_directory( $path );
+		}
+		if ( ! is_dir( $path ) ) { return new WP_Error( 'storage_not_found', 'پوشه واردشده وجود ندارد. تنظیمات را ذخیره کنید تا ساخت خودکار امتحان شود؛ اگر موفق نشد، مدیر باید پوشه را دستی ایجاد کند.' ); }
+		if ( ! is_writable( $path ) || ! is_readable( $path ) || ( '/' === DIRECTORY_SEPARATOR && ! is_executable( $path ) ) ) { return new WP_Error( 'storage_permissions', 'PHP اجازه خواندن، نوشتن یا ورود به پوشه را ندارد. مالکیت و دسترسی پوشه را برای کاربر PHP اصلاح کنید.' ); }
 		return $real;
 	}
-	public static function ready() { return self::directory() && (int) get_option( 'revayat_document_retention_days', 0 ) > 0 && (int) get_option( 'revayat_document_draft_days', 0 ) > 0 && function_exists( 'sodium_crypto_secretbox' ); }
+	public static function directory() { $result = self::check_directory(); return is_wp_error( $result ) ? '' : $result; }
+	public static function issues() {
+		$issues = array(); $directory = self::check_directory();
+		if ( is_wp_error( $directory ) ) { $issues[] = $directory->get_error_message(); }
+		if ( (int) get_option( 'revayat_document_draft_days', 0 ) <= 0 ) { $issues[] = 'مدت نگهداری پیش‌نویس باید بیشتر از صفر باشد.'; }
+		if ( (int) get_option( 'revayat_document_retention_days', 0 ) <= 0 ) { $issues[] = 'مدت نگهداری پس از بسته‌شدن درخواست باید بیشتر از صفر باشد.'; }
+		if ( ! function_exists( 'sodium_crypto_secretbox' ) || ! function_exists( 'sodium_crypto_secretbox_open' ) ) { $issues[] = 'افزونه رمزنگاری Sodium در PHP فعال نیست؛ مدیر هاست باید آن را فعال کند.'; }
+		return $issues;
+	}
+	public static function ready() { return ! self::issues(); }
 	private static function key() { return hash( 'sha256', wp_salt( 'auth' ) . '|revayat-private-documents-v1', true ); }
 	public static function encrypt( $value ) {
 		$nonce = random_bytes( SODIUM_CRYPTO_SECRETBOX_NONCEBYTES );
@@ -24,7 +54,7 @@ class Revayat_Companion_Private_Documents {
 		return sodium_crypto_secretbox_open( substr( $raw, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES ), substr( $raw, 0, SODIUM_CRYPTO_SECRETBOX_NONCEBYTES ), self::key() );
 	}
 	public static function upload( $field ) {
-		if ( ! self::ready() ) { return new WP_Error( 'documents_unavailable', 'دریافت مدارک هنوز فعال نیست؛ سیاست نگهداری و فضای خصوصی باید تنظیم شوند.' ); }
+		if ( ! self::ready() ) { return new WP_Error( 'documents_unavailable', 'ارسال درخواست دسترسی به اتاق وضعیت فعلاً در دسترس نیست. لطفاً بعداً مراجعه کنید.' ); }
 		$file = $_FILES[ $field ] ?? array();
 		if ( ! $file || UPLOAD_ERR_NO_FILE === (int) $file['error'] ) { return null; }
 		if ( UPLOAD_ERR_OK !== (int) $file['error'] || (int) $file['size'] > 5 * MB_IN_BYTES || ! is_uploaded_file( $file['tmp_name'] ) ) { return new WP_Error( 'document_invalid', 'هر تصویر باید معتبر و حداکثر ۵ مگابایت باشد.' ); }

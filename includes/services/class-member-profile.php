@@ -21,9 +21,14 @@ class Revayat_Companion_Member_Profile {
 			$data = array();
 			foreach ( array( 'display_name', 'full_name', 'role_title', 'organization', 'expertise', 'bio' ) as $field ) {
 				$data[ $field ] = 'bio' === $field ? sanitize_textarea_field( $input[ $field ] ?? '' ) : sanitize_text_field( $input[ $field ] ?? '' );
-				if ( mb_strlen( $data[ $field ] ) > ( 'bio' === $field ? 3000 : 160 ) ) { return new WP_Error( 'profile_invalid', 'طول یکی از فیلدها بیش از حد مجاز است.' ); }
+				$limit = 'bio' === $field ? 3000 : 160;
+				if ( mb_strlen( $data[ $field ] ) > $limit ) {
+					$labels = array( 'display_name' => 'نام نمایشی', 'full_name' => 'نام و نام خانوادگی', 'role_title' => 'عنوان شغلی', 'organization' => 'سازمان', 'expertise' => 'حوزه‌های تخصصی', 'bio' => 'معرفی کوتاه' );
+					return new WP_Error( 'profile_invalid', sprintf( '%s باید حداکثر %d نویسه باشد.', $labels[ $field ], $limit ), array( 'field' => $field ) );
+				}
 			}
-			if ( mb_strlen( $data['display_name'] ) < 2 || mb_strlen( $data['full_name'] ) < 3 ) { return new WP_Error( 'profile_invalid', 'نام کامل و نام نمایشی را وارد کنید.' ); }
+			if ( mb_strlen( $data['full_name'] ) < 3 ) { return new WP_Error( 'profile_invalid', 'نام و نام خانوادگی را کامل وارد کنید؛ حداقل ۳ نویسه.', array( 'field' => 'full_name' ) ); }
+			if ( mb_strlen( $data['display_name'] ) < 2 ) { return new WP_Error( 'profile_invalid', 'نام نمایشی را وارد کنید؛ حداقل ۲ نویسه.', array( 'field' => 'display_name' ) ); }
 			// Validate/upload first; invalid images must not partially save textual fields.
 			$result = Revayat_Companion_Profile_Avatar::upload( $user_id );
 			if ( is_wp_error( $result ) ) { return $result; }
@@ -41,16 +46,21 @@ class Revayat_Companion_Member_Profile {
 			}
 			update_user_meta( $user_id, '_rv_profile_version', $version + 1 );
 			update_user_meta( $user_id, '_revayat_profile_completed', 1 );
-			return array( 'message' => 'اطلاعات پروفایل ذخیره شد.', 'version' => $version + 1 );
+			return array( 'message' => 'اطلاعات پروفایل ذخیره شد.', 'version' => $version + 1, 'avatar_url' => get_avatar_url( $user_id ) );
 		} );
 	}
 	public static function authorize( $nonce_action ) {
+		if ( wp_doing_ajax() ) {
+			if ( ! Revayat_Companion_Member_Policy::active( get_current_user_id() ) ) { wp_send_json_error( array( 'message' => 'نشست حساب فعال نیست. دوباره وارد حساب شوید؛ متن فرم را پیش از آن نگه دارید.', 'code' => 'forbidden' ), 403 ); }
+			if ( ! check_ajax_referer( $nonce_action, 'rv_nonce', false ) ) { wp_send_json_error( array( 'message' => 'اعتبار این صفحه تمام شده است. متن فرم را نگه دارید و صفحه را تازه کنید.', 'code' => 'invalid_nonce' ), 403 ); }
+			return;
+		}
 		if ( ! Revayat_Companion_Member_Policy::active( get_current_user_id() ) ) { wp_die( 'دسترسی غیرمجاز', '', array( 'response' => 403 ) ); }
 		check_admin_referer( $nonce_action, 'rv_nonce' );
 	}
 	public static function respond( $result, $view ) {
 		if ( wp_doing_ajax() ) {
-			if ( is_wp_error( $result ) ) { wp_send_json_error( array( 'message' => $result->get_error_message(), 'code' => $result->get_error_code() ), 400 ); }
+			if ( is_wp_error( $result ) ) { $details = $result->get_error_data(); wp_send_json_error( array( 'message' => $result->get_error_message(), 'code' => $result->get_error_code(), 'field' => is_array( $details ) ? ( $details['field'] ?? '' ) : '' ), 400 ); }
 			wp_send_json_success( $result );
 		}
 		set_transient( 'rv_portal_flash_' . get_current_user_id(), array( 'error' => is_wp_error( $result ), 'message' => is_wp_error( $result ) ? $result->get_error_message() : ( $result['message'] ?? 'ذخیره شد.' ) ), MINUTE_IN_SECONDS );
