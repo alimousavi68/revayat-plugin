@@ -243,6 +243,8 @@ if ( ! class_exists( 'Revayat_Companion_Plugin' ) ) {
 			$this->loader->add_action( 'admin_post_revayat_application_review', 'Revayat_Companion_Member_Applications_Admin', 'decide' );
 			$this->loader->add_action( 'admin_post_revayat_member_application', 'Revayat_Companion_Member_Applications', 'handle' );
 			$this->loader->add_action( 'wp_ajax_revayat_member_application', 'Revayat_Companion_Member_Applications', 'handle' );
+			$this->loader->add_action( 'wp_ajax_revayat_application_status', 'Revayat_Companion_Member_Applications', 'status' );
+			$this->loader->add_action( 'revayat_application_status_notification', 'Revayat_Companion_Member_Applications', 'notify_status', 10, 4 );
 			$this->loader->add_action( 'admin_post_revayat_private_document', 'Revayat_Companion_Private_Documents', 'download' );
 			$this->loader->add_action( 'revayat_private_document_cleanup', 'Revayat_Companion_Private_Documents', 'cleanup' );
 			foreach ( array( 'wp_ajax_', 'admin_post_' ) as $prefix ) {

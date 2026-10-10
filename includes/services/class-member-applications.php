@@ -12,6 +12,16 @@ class Revayat_Companion_Member_Applications {
 		return $items ? $items[0] : null;
 	}
 	public static function state( $post ) { return $post ? ( get_post_meta( $post->ID, '_rv_state', true ) ?: 'draft' ) : 'none'; }
+	public static function snapshot( $user_id, $type ) {
+		$post = self::latest( $user_id, $type ); $state = self::state( $post );
+		return array( 'id' => $post ? (int) $post->ID : 0, 'version' => $post ? (int) get_post_meta( $post->ID, '_rv_version', true ) : 0, 'state' => $state, 'label' => self::labels()[ $state ], 'url' => home_url( '/dashboard/?view=' . ( 'analyst' === $type ? 'analyst-request' : 'situation-access' ) ) );
+	}
+	public static function status() {
+		Revayat_Companion_Member_Profile::authorize( 'rv_application_status' );
+		nocache_headers();
+		wp_send_json_success( array( 'analyst' => self::snapshot( get_current_user_id(), 'analyst' ), 'situation' => self::snapshot( get_current_user_id(), 'situation' ) ) );
+	}
+	public static function notify_status( $user_id, $type, $state, $event ) { do_action( 'revayat_access_status_changed', $user_id, $type, $state, $event ); }
 	public static function valid_national_id( $value ) {
 		if ( ! preg_match( '/^\d{10}$/', $value ) || preg_match( '/^(\d)\1{9}$/', $value ) ) { return false; }
 		$sum = 0; for ( $i = 0; $i < 9; $i++ ) { $sum += (int) $value[ $i ] * ( 10 - $i ); }
@@ -24,19 +34,22 @@ class Revayat_Companion_Member_Applications {
 			$post = self::latest( $user_id, $type ); $state = self::state( $post );
 			$mode = sanitize_key( $input['mode'] ?? 'draft' );
 			if ( ! in_array( $mode, array( 'draft', 'submit', 'withdraw' ), true ) ) { return new WP_Error( 'invalid_mode', 'عملیات معتبر نیست.' ); }
-			if ( $post && (int) get_post_meta( $post->ID, '_rv_version', true ) !== (int) ( $input['version'] ?? -1 ) ) { return new WP_Error( 'conflict', 'وضعیت درخواست تغییر کرده؛ صفحه را تازه کنید.' ); }
+			if ( $post && (int) get_post_meta( $post->ID, '_rv_version', true ) !== (int) ( $input['version'] ?? -1 ) ) { return new WP_Error( 'conflict', 'این درخواست قبلاً ذخیره شده یا وضعیت آن تغییر کرده است. برای دیدن وضعیت تازه، «پیگیری درخواست» را بزنید.', array( 'application' => self::snapshot( $user_id, $type ) ) ); }
 			if ( 'withdraw' === $mode ) {
 				if ( ! in_array( $state, array( 'pending', 'needs_changes', 'draft' ), true ) ) { return new WP_Error( 'invalid_state', 'امکان انصراف از این درخواست وجود ندارد.' ); }
-				self::transition( $post, 'withdrawn', $user_id, 'انصراف متقاضی' ); return array( 'message' => 'انصراف ثبت شد.', 'reload' => true );
+				self::transition( $post, 'withdrawn', $user_id, 'انصراف متقاضی' ); return array( 'message' => 'انصراف ثبت شد.', 'redirect' => home_url( '/dashboard/?view=requests' ) );
 			}
-			if ( in_array( $state, array( 'pending', 'approved' ), true ) ) { return new WP_Error( 'invalid_state', 'این درخواست در حال بررسی است یا قبلاً تأیید شده است.' ); }
+			if ( in_array( $state, array( 'pending', 'approved' ), true ) ) { return new WP_Error( 'invalid_state', 'درخواست فعال دارید؛ نیازی به ارسال دوباره نیست.', array( 'application' => self::snapshot( $user_id, $type ) ) ); }
 			if ( 'situation' === $type && ! Revayat_Companion_Private_Documents::ready() ) { return new WP_Error( 'documents_unavailable', 'ارسال درخواست دسترسی به اتاق وضعیت فعلاً در دسترس نیست. لطفاً بعداً مراجعه کنید.' ); }
 			$data = array();
 			foreach ( array( 'full_name', 'role_title', 'organization', 'expertise', 'bio', 'sample_url', 'reason' ) as $field ) { $data[ $field ] = sanitize_textarea_field( $input[ $field ] ?? '' ); if ( mb_strlen( $data[ $field ] ) > ( 'bio' === $field ? 3000 : 500 ) ) { return new WP_Error( 'too_long', 'طول یکی از فیلدها بیش از حد مجاز است.' ); } }
+			if ( $data['sample_url'] && ( ! in_array( strtolower( (string) wp_parse_url( $data['sample_url'], PHP_URL_SCHEME ) ), array( 'http', 'https' ), true ) || ! wp_parse_url( $data['sample_url'], PHP_URL_HOST ) ) ) { return new WP_Error( 'sample_invalid', 'پیوند نمونه تحلیل باید آدرس معتبر با http:// یا https:// باشد.', array( 'field' => 'sample_url' ) ); }
 			$data['sample_url'] = esc_url_raw( $data['sample_url'], array( 'http', 'https' ) );
 			if ( 'submit' === $mode ) {
-				if ( mb_strlen( $data['full_name'] ) < 3 || empty( $input['consent'] ) ) { return new WP_Error( 'incomplete', 'نام کامل و تأیید شرایط لازم است.' ); }
-				if ( 'analyst' === $type && ( ! $data['expertise'] || mb_strlen( $data['bio'] ) < 30 ) ) { return new WP_Error( 'incomplete', 'حوزه تخصصی و معرفی حرفه‌ای حداقل ۳۰ نویسه را تکمیل کنید.' ); }
+				if ( mb_strlen( $data['full_name'] ) < 3 ) { return new WP_Error( 'incomplete', 'نام و نام خانوادگی را کامل وارد کنید.', array( 'field' => 'full_name' ) ); }
+				if ( empty( $input['consent'] ) ) { return new WP_Error( 'incomplete', 'صحت اطلاعات و شرایط درخواست را تأیید کنید.', array( 'field' => 'consent' ) ); }
+				if ( 'analyst' === $type && ! $data['expertise'] ) { return new WP_Error( 'incomplete', 'حوزه تخصصی خود را وارد کنید.', array( 'field' => 'expertise' ) ); }
+				if ( 'analyst' === $type && mb_strlen( $data['bio'] ) < 30 ) { return new WP_Error( 'incomplete', 'معرفی حرفه‌ای باید حداقل ۳۰ نویسه باشد.', array( 'field' => 'bio' ) ); }
 			}
 			$new_attempt = in_array( $state, array( 'rejected', 'withdrawn', 'revoked' ), true );
 			$documents = $post && ! $new_attempt ? (array) get_post_meta( $post->ID, '_rv_documents', true ) : array();
@@ -44,7 +57,7 @@ class Revayat_Companion_Member_Applications {
 			if ( 'situation' === $type ) {
 				$national = preg_replace( '/\s+/', '', Revayat_Companion_OTP_Service::digits( $input['national_id'] ?? '' ) );
 				if ( ! $national && $post && ! $new_attempt ) { $national = Revayat_Companion_Private_Documents::decrypt( get_post_meta( $post->ID, '_rv_national_id', true ) ) ?: ''; }
-				if ( ( $national && ! self::valid_national_id( $national ) ) || ( 'submit' === $mode && ! $national ) ) { return new WP_Error( 'national_invalid', 'کد ملی ده‌رقمی معتبر وارد کنید.' ); }
+				if ( ( $national && ! self::valid_national_id( $national ) ) || ( 'submit' === $mode && ! $national ) ) { return new WP_Error( 'national_invalid', 'کد ملی ده‌رقمی معتبر وارد کنید.', array( 'field' => 'national_id' ) ); }
 				foreach ( array( 'portrait', 'national_card' ) as $field ) {
 					$result = Revayat_Companion_Private_Documents::upload( $field );
 					if ( is_wp_error( $result ) ) { foreach ( $uploaded as $token ) { Revayat_Companion_Private_Documents::delete( $token ); } return $result; }
@@ -61,7 +74,9 @@ class Revayat_Companion_Member_Applications {
 			update_post_meta( $post->ID, '_rv_payload', $data );
 			if ( 'situation' === $type ) { update_post_meta( $post->ID, '_rv_documents', $documents ); update_post_meta( $post->ID, '_rv_national_id', Revayat_Companion_Private_Documents::encrypt( $national ) ); }
 			self::transition( $post, 'submit' === $mode ? 'pending' : 'draft', $user_id, '' );
-			return array( 'message' => 'submit' === $mode ? 'درخواست برای بررسی ارسال شد.' : 'پیش‌نویس درخواست ذخیره شد.', 'reload' => true );
+			$result = array( 'message' => 'submit' === $mode ? 'درخواست ثبت شد و در انتظار بررسی است؛ نتیجه را از درخواست‌های من پیگیری کنید.' : 'پیش‌نویس ذخیره شد؛ هنوز برای بررسی ارسال نشده است.', 'version' => (int) get_post_meta( $post->ID, '_rv_version', true ), 'application' => self::snapshot( $user_id, $type ) );
+			if ( 'submit' === $mode ) { $result['redirect'] = home_url( '/dashboard/?view=requests&submitted=' . $type ); } else { $result['redirect'] = add_query_arg( 'saved', 'draft', $result['application']['url'] ); }
+			return $result;
 		} );
 	}
 	private static function transition( $post, $state, $actor, $reason ) {
@@ -81,7 +96,9 @@ class Revayat_Companion_Member_Applications {
 			$items = get_user_meta( $post->post_author, '_revayat_portal_notifications', true ); $items = is_array( $items ) ? $items : array();
 			array_unshift( $items, array( 'id' => $event, 'post_id' => 0, 'status' => $state, 'message' => 'درخواست ' . ( 'analyst' === $type ? 'تحلیلگری' : 'اتاق وضعیت' ) . ': ' . $label . ( $reason ? ' — ' . $reason : '' ), 'created_at' => current_time( 'mysql', true ), 'read' => false ) );
 			update_user_meta( $post->post_author, '_revayat_portal_notifications', array_slice( $items, 0, 30 ) );
-			do_action( 'revayat_access_status_changed', (int) $post->post_author, 'analyst' === $type ? 'تحلیلگری' : 'اتاق وضعیت', $state, $event );
+			$args = array( (int) $post->post_author, 'analyst' === $type ? 'تحلیلگری' : 'اتاق وضعیت', $state, $event );
+			// Sending an SMS must not hold up acknowledgement of the saved request.
+			if ( ! wp_schedule_single_event( time() + 1, 'revayat_application_status_notification', $args ) ) { self::notify_status( ...$args ); }
 		}
 	}
 	public static function review( $id, $state, $reason, $version, $reviewer ) {

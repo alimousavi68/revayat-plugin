@@ -60,7 +60,7 @@ class Revayat_Companion_Member_Profile {
 	}
 	public static function respond( $result, $view ) {
 		if ( wp_doing_ajax() ) {
-			if ( is_wp_error( $result ) ) { $details = $result->get_error_data(); wp_send_json_error( array( 'message' => $result->get_error_message(), 'code' => $result->get_error_code(), 'field' => is_array( $details ) ? ( $details['field'] ?? '' ) : '' ), 400 ); }
+			if ( is_wp_error( $result ) ) { $details = $result->get_error_data(); wp_send_json_error( array( 'message' => $result->get_error_message(), 'code' => $result->get_error_code(), 'field' => is_array( $details ) ? ( $details['field'] ?? '' ) : '', 'application' => is_array( $details ) ? ( $details['application'] ?? null ) : null ), 400 ); }
 			wp_send_json_success( $result );
 		}
 		set_transient( 'rv_portal_flash_' . get_current_user_id(), array( 'error' => is_wp_error( $result ), 'message' => is_wp_error( $result ) ? $result->get_error_message() : ( $result['message'] ?? 'ذخیره شد.' ) ), MINUTE_IN_SECONDS );
