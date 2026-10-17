@@ -132,8 +132,12 @@ if ( ! class_exists( 'Revayat_Companion_Plugin' ) ) {
 			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-member-profile.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-member-notes.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-private-documents.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-situation-media.php';
+			Revayat_Companion_Situation_Media::hooks();
 			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-member-applications.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/admin/class-member-applications-admin.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/admin/class-admin-notifications.php';
+			Revayat_Companion_Admin_Notifications::hooks();
 			require_once REVAYAT_COMPANION_PATH . 'includes/widgets/class-contextual-widget.php';
 
 			$this->post_types  = new Revayat_Companion_Post_Types();
@@ -196,8 +200,6 @@ if ( ! class_exists( 'Revayat_Companion_Plugin' ) ) {
 			$this->loader->add_action( 'admin_init', 'Revayat_Companion_SMS_Settings', 'register' );
 			$this->loader->add_action( 'admin_menu', 'Revayat_Companion_SMS_Settings', 'menu' );
 			$this->loader->add_action( 'admin_enqueue_scripts', 'Revayat_Companion_SMS_Settings', 'enqueue' );
-			$this->loader->add_action( 'admin_menu', 'Revayat_Companion_Person_Identity', 'register_tools_page' );
-			$this->loader->add_action( 'admin_post_revayat_migrate_analyst_identity', 'Revayat_Companion_Person_Identity', 'handle_migration' );
 			$this->loader->add_action( 'add_meta_boxes', 'Revayat_Companion_Dossier_Links_Admin', 'register_metabox' );
 			$this->loader->add_action( 'save_post_special_dossier', 'Revayat_Companion_Dossier_Links_Admin', 'save', 10, 2 );
 			$this->loader->add_action( 'admin_enqueue_scripts', 'Revayat_Companion_Dossier_Links_Admin', 'enqueue' );
@@ -208,7 +210,6 @@ if ( ! class_exists( 'Revayat_Companion_Plugin' ) ) {
 			$this->loader->add_action( 'admin_init', $this->user_portal, 'restrict_admin' );
 			$this->loader->add_action( 'admin_menu', $this->user_portal, 'register_approval_page' );
 			$this->loader->add_action( 'admin_menu', $this->user_portal, 'register_special_access_page' );
-			$this->loader->add_action( 'admin_menu', $this->user_portal, 'register_email_report_page' );
 			$this->loader->add_action( 'admin_post_revayat_review_user', $this->user_portal, 'handle_review_user' );
 			$this->loader->add_action( 'admin_post_revayat_review_special_access', $this->user_portal, 'handle_review_special_access' );
 			$this->loader->add_action( 'add_meta_boxes', $this->user_portal, 'register_editorial_note_metabox' );

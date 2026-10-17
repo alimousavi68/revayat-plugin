@@ -732,47 +732,7 @@ class Revayat_Companion_User_Portal {
 		if ( ! is_array( $mail ) || empty( $mail['to'] ) || empty( $mail['subject'] ) || empty( $mail['message'] ) ) {
 			return false;
 		}
-		$failure_message = '';
-		$failure_handler = static function ( $error ) use ( &$failure_message ) {
-			if ( $error instanceof WP_Error ) {
-				$failure_message = $error->get_error_message();
-			}
-		};
-		add_action( 'wp_mail_failed', $failure_handler, 10, 1 );
-		$result = wp_mail( $mail['to'], $mail['subject'], $mail['message'], $mail['headers'] ?? array() );
-		remove_action( 'wp_mail_failed', $failure_handler, 10 );
-		self::log_editorial_email( $post, $status, $mail['to'], $mail['subject'], $result, $failure_message );
-		return $result;
-	}
-
-	/** نگهداری گزارش محدود ارسال ایمیل برای عیب‌یابی مدیر. */
-	private static function log_editorial_email( $post, $status, $recipient, $subject, $result, $error = '' ) {
-		$log = get_option( '_revayat_editorial_email_log', array() );
-		$log = is_array( $log ) ? $log : array();
-		array_unshift(
-			$log,
-			array(
-				'id'         => wp_generate_uuid4(),
-				'post_id'    => (int) $post->ID,
-				'user_id'    => (int) $post->post_author,
-				'status'     => sanitize_key( $status ),
-				'recipient'  => sanitize_email( $recipient ),
-				'subject'    => sanitize_text_field( $subject ),
-				'result'     => $result ? 'accepted' : 'failed',
-				'error'      => $result ? '' : sanitize_text_field( $error ?: 'wp_mail نتیجه ناموفق برگرداند.' ),
-				'created_at' => current_time( 'mysql', true ),
-			)
-		);
-		update_option( '_revayat_editorial_email_log', array_slice( $log, 0, 100 ), false );
-	}
-
-	/** گزارش ارسال ایمیل فقط برای مدیر سامانه. */
-	public static function get_email_delivery_log( $limit = 50 ) {
-		if ( ! current_user_can( 'manage_options' ) ) {
-			return array();
-		}
-		$log = get_option( '_revayat_editorial_email_log', array() );
-		return is_array( $log ) ? array_slice( $log, 0, max( 1, min( 100, absint( $limit ) ) ) ) : array();
+		return wp_mail( $mail['to'], $mail['subject'], $mail['message'], $mail['headers'] ?? array() );
 	}
 
 	/** اعمال SMTP فقط در صورت تعریف صریح ثابت‌های امن سرور. */
@@ -911,6 +871,7 @@ class Revayat_Companion_User_Portal {
 
 	/** افزودن کارتابل بررسی درخواست‌ها زیر منوی کاربران. */
 	public function register_approval_page() {
+		if ( ! Revayat_Companion_Admin_Notifications::permitted() ) { return; }
 		add_users_page(
 			'درخواست‌های شبکه تحلیلگران',
 			'عضویت شبکه تحلیلگران',
@@ -922,6 +883,7 @@ class Revayat_Companion_User_Portal {
 
 	/** کارتابل مستقل بررسی دسترسی اتاق وضعیت. */
 	public function register_special_access_page() {
+		if ( ! Revayat_Companion_Admin_Notifications::permitted() ) { return; }
 		add_users_page(
 			'درخواست‌های دسترسی ویژه',
 			'دسترسی ویژه',
@@ -933,7 +895,7 @@ class Revayat_Companion_User_Portal {
 
 	/** نمایش درخواست‌های ویژه بدون افشای محتوای اتاق وضعیت. */
 	public function render_special_access_page() {
-		if ( ! current_user_can( 'revayat_manage_approvals' ) ) {
+		if ( ! Revayat_Companion_Admin_Notifications::permitted() ) {
 			wp_die( esc_html__( 'دسترسی غیرمجاز است.', 'revayat-companion' ), '', array( 'response' => 403 ) );
 		}
 		$applicants = get_users(
@@ -991,7 +953,7 @@ class Revayat_Companion_User_Portal {
 
 	/** هندلر امن تصمیم مدیر برای درخواست ویژه. */
 	public function handle_review_special_access() {
-		if ( ! current_user_can( 'revayat_manage_approvals' ) ) {
+		if ( ! Revayat_Companion_Admin_Notifications::permitted() ) {
 			wp_die( esc_html__( 'دسترسی غیرمجاز است.', 'revayat-companion' ), '', array( 'response' => 403 ) );
 		}
 		$user_id  = isset( $_GET['user_id'] ) ? absint( $_GET['user_id'] ) : 0;
@@ -1005,55 +967,9 @@ class Revayat_Companion_User_Portal {
 		exit;
 	}
 
-	/** افزودن گزارش سلامت و ارسال ایمیل زیر منوی ابزارها. */
-	public function register_email_report_page() {
-		add_management_page(
-			'گزارش ایمیل‌های تحریریه',
-			'ایمیل‌های تحریریه',
-			'manage_options',
-			'revayat-editorial-email-log',
-			array( $this, 'render_email_report_page' )
-		);
-	}
-
-	/** نمایش گزارش بدون افشای رمز یا نام کاربری SMTP. */
-	public function render_email_report_page() {
-		if ( ! current_user_can( 'manage_options' ) ) {
-			wp_die( esc_html__( 'دسترسی غیرمجاز است.', 'revayat-companion' ), '', array( 'response' => 403 ) );
-		}
-		$log             = self::get_email_delivery_log( 100 );
-		$smtp_configured = defined( 'REVAYAT_SMTP_HOST' ) && REVAYAT_SMTP_HOST;
-		?>
-		<div class="wrap">
-			<h1><?php esc_html_e( 'گزارش ایمیل‌های تحریریه', 'revayat-companion' ); ?></h1>
-			<div class="notice <?php echo $smtp_configured ? 'notice-success' : 'notice-warning'; ?> inline"><p>
-				<?php if ( $smtp_configured ) : ?>
-					<?php printf( esc_html__( 'SMTP برای میزبان %1$s و پورت %2$d پیکربندی شده است.', 'revayat-companion' ), esc_html( REVAYAT_SMTP_HOST ), defined( 'REVAYAT_SMTP_PORT' ) ? absint( REVAYAT_SMTP_PORT ) : 587 ); ?>
-				<?php else : ?>
-					<?php esc_html_e( 'SMTP اختصاصی پیکربندی نشده و وردپرس از Mail پیش‌فرض سرور استفاده می‌کند.', 'revayat-companion' ); ?>
-				<?php endif; ?>
-			</p></div>
-			<p><?php esc_html_e( 'وضعیت «پذیرفته‌شده» یعنی wp_mail پیام را بدون خطا پذیرفته است و به‌تنهایی تحویل نهایی به صندوق گیرنده را تضمین نمی‌کند.', 'revayat-companion' ); ?></p>
-			<table class="widefat striped">
-				<thead><tr><th><?php esc_html_e( 'زمان', 'revayat-companion' ); ?></th><th><?php esc_html_e( 'یادداشت', 'revayat-companion' ); ?></th><th><?php esc_html_e( 'گیرنده', 'revayat-companion' ); ?></th><th><?php esc_html_e( 'وضعیت محتوا', 'revayat-companion' ); ?></th><th><?php esc_html_e( 'نتیجه ارسال', 'revayat-companion' ); ?></th><th><?php esc_html_e( 'خطا', 'revayat-companion' ); ?></th></tr></thead>
-				<tbody>
-				<?php if ( $log ) : foreach ( $log as $item ) :
-					$post_id    = absint( $item['post_id'] ?? 0 );
-					$post_title = get_the_title( $post_id ) ?: '#' . $post_id;
-					$status_key = sanitize_key( $item['status'] ?? '' );
-					$labels     = self::get_review_status_labels();
-					?>
-					<tr><td><?php echo esc_html( get_date_from_gmt( $item['created_at'] ?? '', 'Y/m/d H:i' ) ); ?></td><td><?php echo esc_html( $post_title ); ?></td><td><?php echo esc_html( $item['recipient'] ?? '' ); ?></td><td><?php echo esc_html( $labels[ $status_key ] ?? $status_key ); ?></td><td><?php echo 'accepted' === ( $item['result'] ?? '' ) ? esc_html__( 'پذیرفته‌شده', 'revayat-companion' ) : esc_html__( 'ناموفق', 'revayat-companion' ); ?></td><td><?php echo esc_html( $item['error'] ?? '' ); ?></td></tr>
-				<?php endforeach; else : ?><tr><td colspan="6"><?php esc_html_e( 'هنوز ایمیلی ثبت نشده است.', 'revayat-companion' ); ?></td></tr><?php endif; ?>
-				</tbody>
-			</table>
-		</div>
-		<?php
-	}
-
 	/** نمایش درخواست‌های عضویت در انتظار بررسی. */
 	public function render_approval_page() {
-		if ( ! current_user_can( 'revayat_manage_approvals' ) ) {
+		if ( ! Revayat_Companion_Admin_Notifications::permitted() ) {
 			wp_die( esc_html__( 'دسترسی غیرمجاز است.', 'revayat-companion' ), '', array( 'response' => 403 ) );
 		}
 		$applicants = get_users(
@@ -1118,7 +1034,7 @@ class Revayat_Companion_User_Portal {
 
 	/** تأیید یا رد درخواست با nonce و capability مدیریتی. */
 	public function handle_review_user() {
-		if ( ! current_user_can( 'revayat_manage_approvals' ) ) {
+		if ( ! Revayat_Companion_Admin_Notifications::permitted() ) {
 			wp_die( esc_html__( 'دسترسی غیرمجاز است.', 'revayat-companion' ), '', array( 'response' => 403 ) );
 		}
 		$user_id  = isset( $_GET['user_id'] ) ? absint( $_GET['user_id'] ) : 0;
