@@ -21,7 +21,10 @@ class Revayat_Companion_Auth_Flow {
 		if ( is_array( $data ) ) {
 			$state += Revayat_Companion_OTP_Service::timing( $data['mobile'], $data['context'] );
 			$state['masked_mobile'] = substr( $data['mobile'], 0, 4 ) . '•••' . substr( $data['mobile'], -4 );
-			$state['context'] = $data['context'];
+			$state['context']       = $data['context'];
+			$state['channel']       = $data['channel'] ?? 'sms';
+			$state['masked_target'] = $data['masked_target'] ?? '';
+			$state['notice']        = $data['notice'] ?? '';
 		}
 		wp_send_json_success( $state );
 	}
@@ -34,7 +37,7 @@ class Revayat_Companion_Auth_Flow {
 		$action = sanitize_key( $_POST['operation'] ?? '' );
 		$result = self::perform( $action, wp_unslash( $_POST ) );
 		if ( is_wp_error( $result ) ) {
-			wp_send_json_error( array( 'code' => $result->get_error_code(), 'message' => $result->get_error_message(), 'timing' => $result->get_error_data() ), 400 );
+			wp_send_json_error( array( 'code' => $result->get_error_code(), 'message' => $result->get_error_message(), 'data' => $result->get_error_data(), 'timing' => $result->get_error_data() ), 400 );
 		}
 		wp_send_json_success( $result );
 	}
@@ -46,17 +49,40 @@ class Revayat_Companion_Auth_Flow {
 	public static function perform( $action, $input ) {
 		if ( is_user_logged_in() ) { return array( 'redirect' => home_url( '/dashboard/' ) ); }
 		if ( 'request' === $action ) {
-			$mobile = Revayat_Companion_User_Portal::normalize_mobile( $input['mobile'] ?? '' );
+			$mobile  = Revayat_Companion_User_Portal::normalize_mobile( $input['mobile'] ?? '' );
+			$email   = sanitize_email( $input['email'] ?? '' );
 			$context = 'recover' === ( $input['context'] ?? '' ) ? 'recover' : 'auth';
-			$result = Revayat_Companion_OTP_Service::request( $mobile, $context );
+			$result  = Revayat_Companion_OTP_Service::request( $mobile, $context, $email );
 			if ( is_wp_error( $result ) ) { return $result; }
-			set_transient( self::key(), array( 'mobile' => $mobile, 'context' => $context, 'redirect' => self::destination( $input['redirect_to'] ?? '' ) ), HOUR_IN_SECONDS );
-			return array_merge( Revayat_Companion_OTP_Service::timing( $mobile, $context ), array( 'step' => 'verify', 'masked_mobile' => substr( $mobile, 0, 4 ) . '•••' . substr( $mobile, -4 ), 'context' => $context ) );
+			$channel       = is_array( $result ) ? ( $result['channel'] ?? 'sms' ) : 'sms';
+			$masked_target = is_array( $result ) ? ( $result['masked_target'] ?? '' ) : '';
+			$notice        = is_array( $result ) ? ( $result['notice'] ?? '' ) : '';
+			set_transient( self::key(), array(
+				'mobile'        => $mobile,
+				'email'         => $email,
+				'context'       => $context,
+				'channel'       => $channel,
+				'masked_target' => $masked_target,
+				'notice'        => $notice,
+				'redirect'      => self::destination( $input['redirect_to'] ?? '' ),
+			), HOUR_IN_SECONDS );
+			return array_merge(
+				Revayat_Companion_OTP_Service::timing( $mobile, $context ),
+				array(
+					'step'          => 'verify',
+					'masked_mobile' => substr( $mobile, 0, 4 ) . '•••' . substr( $mobile, -4 ),
+					'context'       => $context,
+					'channel'       => $channel,
+					'masked_target' => $masked_target,
+					'notice'        => $notice,
+				)
+			);
 		}
 		if ( 'resend' === $action ) {
 			$data = get_transient( self::key() );
 			if ( ! is_array( $data ) ) { return new WP_Error( 'otp_expired', 'شماره موبایل را دوباره وارد کنید.' ); }
-			return self::perform( 'request', array( 'mobile' => $data['mobile'], 'context' => $data['context'], 'redirect_to' => $data['redirect'] ) );
+			$email = sanitize_email( $input['email'] ?? ( $data['email'] ?? '' ) );
+			return self::perform( 'request', array( 'mobile' => $data['mobile'], 'email' => $email, 'context' => $data['context'], 'redirect_to' => $data['redirect'] ) );
 		}
 		if ( 'password' === $action ) {
 			$key = 'rv_password_rate_' . hash( 'sha256', ( $_SERVER['REMOTE_ADDR'] ?? '' ) );
@@ -85,6 +111,9 @@ class Revayat_Companion_Auth_Flow {
 		if ( ! $user ) { $user = Revayat_Companion_User_Portal::create_mobile_member( $data['mobile'] ); }
 		if ( is_wp_error( $user ) || ! $user ) { return new WP_Error( 'registration_failed', 'ایجاد حساب انجام نشد؛ دوباره تلاش کنید.' ); }
 		if ( ! Revayat_Companion_Member_Policy::active( $user->ID ) ) { return new WP_Error( 'account_suspended', 'حساب شما غیرفعال است؛ با مدیریت تماس بگیرید.' ); }
+		if ( $is_new && ! empty( $data['email'] ) && is_email( $data['email'] ) ) {
+			wp_update_user( array( 'ID' => $user->ID, 'user_email' => $data['email'] ) );
+		}
 		update_user_meta( $user->ID, '_revayat_mobile_verified', 1 );
 		update_user_meta( $user->ID, '_revayat_mobile_verified_at', current_time( 'mysql', true ) );
 		wp_set_current_user( $user->ID );

@@ -15,7 +15,11 @@ class Revayat_Companion_SMS_Settings {
 			'ippanel_api_key' => '', 'ippanel_sender' => '', 'ippanel_admin_access_id' => '', 'ippanel_admin_post_id' => '',
 			'webhook_url' => '', 'webhook_token' => '', 'webhook_template' => '',
 			'admin_numbers' => '', 'enabled_access' => 0, 'enabled_post' => 0, 'admin_access' => 0, 'admin_post' => 0,
-			'smsir_credit_warning' => 0, 'ippanel_credit_warning' => 0
+			'smsir_credit_warning' => 0, 'ippanel_credit_warning' => 0,
+			'support_text' => 'در صورت عدم دریافت پیامک یا نیاز به راهنمایی، از طریق پیام‌رسان‌ها با ما در ارتباط باشید:',
+			'support_bale' => 'https://ble.ir/revayatiran',
+			'support_eitaa' => 'https://eitaa.com/revayatiran',
+			'support_telegram' => 'https://t.me/revayatiran',
 		);
 		foreach ( Revayat_Companion_SMS_Service::contexts() as $context => $label ) {
 			$defaults[ 'route_' . $context ] = '';
@@ -33,6 +37,15 @@ class Revayat_Companion_SMS_Settings {
 		$value = get_option( self::OPTION, array() );
 		return wp_parse_args( is_array( $value ) ? $value : array(), self::defaults() );
 	}
+	public static function support_links(): array {
+		$all = self::all();
+		return array(
+			'text'     => $all['support_text'] ?: 'در صورت عدم دریافت پیامک یا نیاز به راهنمایی، از طریق پیام‌رسان‌ها با ما در ارتباط باشید:',
+			'bale'     => $all['support_bale'] ?: 'https://ble.ir/revayatiran',
+			'eitaa'    => $all['support_eitaa'] ?: 'https://eitaa.com/revayatiran',
+			'telegram' => $all['support_telegram'] ?: 'https://t.me/revayatiran',
+		);
+	}
 	public static function constant_name( string $key ): string {
 		$aliases = array( 'smsir_register_id' => defined( 'REVAYAT_SMSIR_AUTH_TEMPLATE_ID' ) ? 'REVAYAT_SMSIR_AUTH_TEMPLATE_ID' : 'REVAYAT_SMSIR_REGISTER_TEMPLATE_ID', 'smsir_recover_id' => 'REVAYAT_SMSIR_RECOVER_TEMPLATE_ID', 'smsir_access_id' => 'REVAYAT_SMSIR_ACCESS_STATUS_TEMPLATE_ID', 'smsir_post_id' => 'REVAYAT_SMSIR_POST_STATUS_TEMPLATE_ID', 'smsir_parameter' => 'REVAYAT_SMSIR_CODE_PARAMETER', 'webhook_url' => 'REVAYAT_OTP_WEBHOOK_URL', 'webhook_token' => 'REVAYAT_OTP_WEBHOOK_TOKEN', 'webhook_template' => 'REVAYAT_OTP_WEBHOOK_TEMPLATE' );
 		return $aliases[ $key ] ?? 'REVAYAT_' . strtoupper( $key );
@@ -47,6 +60,7 @@ class Revayat_Companion_SMS_Settings {
 			'smsir' => array( 'smsir_api_key' => 'کلید API', 'smsir_parameter' => 'نام متغیر کد (سازگاری قبلی)', 'smsir_line_number' => 'خط اختیاری؛ در ارسال قالبی مصرف نمی‌شود', 'smsir_credit_warning' => 'آستانه هشدار اعتبار (۰: خاموش)', 'smsir_admin_access_id' => 'شناسه قالب اختصاصی مدیر: درخواست دسترسی (اختیاری)', 'smsir_admin_post_id' => 'شناسه قالب اختصاصی مدیر: یادداشت تازه (اختیاری)' ),
 			'ippanel' => array( 'ippanel_api_key' => 'کلید API', 'ippanel_sender' => 'شماره فرستنده مجاز با +98', 'ippanel_credit_warning' => 'آستانه هشدار اعتبار (۰: خاموش)', 'ippanel_admin_access_id' => 'کد پترن اختصاصی مدیر: درخواست دسترسی (اختیاری)', 'ippanel_admin_post_id' => 'کد پترن اختصاصی مدیر: یادداشت تازه (اختیاری)' ),
 			'webhook' => array( 'webhook_url' => 'نشانی HTTPS', 'webhook_token' => 'توکن', 'webhook_template' => 'شناسه قالب' ),
+			'support' => array( 'support_text' => 'متن راهنمای پشتیبانی در فرم‌ها', 'support_bale' => 'لینک یا شناسه پشتیبانی بله (Bale)', 'support_eitaa' => 'لینک یا شناسه پشتیبانی ایتا (Eitaa)', 'support_telegram' => 'لینک یا شناسه پشتیبانی تلگرام (Telegram)' ),
 		);
 		foreach ( Revayat_Companion_SMS_Service::contexts() as $context => $label ) {
 			$groups['common'][ 'route_' . $context ] = 'درگاه ' . $label;
@@ -114,6 +128,7 @@ class Revayat_Companion_SMS_Settings {
 			elseif ( 'webhook_url' === $key ) { $old[ $key ] = esc_url_raw( $value, array( 'https' ) ); }
 			elseif ( 'ippanel_sender' === $key ) { $old[ $key ] = preg_replace( '/[^+0-9]/', '', $value ); }
 			elseif ( 'smsir_parameter' === $key ) { $old[ $key ] = preg_replace( '/[^A-Za-z0-9_]/', '', $value ) ?: 'Code'; }
+			elseif ( in_array( $key, array( 'support_bale', 'support_eitaa', 'support_telegram' ), true ) ) { $old[ $key ] = esc_url_raw( $value ); }
 			else { $old[ $key ] = sanitize_text_field( $value ); }
 		}
 		return $old;

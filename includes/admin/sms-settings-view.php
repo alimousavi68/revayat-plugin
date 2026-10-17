@@ -1,12 +1,12 @@
 <?php
 /** Admin-only settings view; secrets are deliberately never rendered. */
 if ( ! defined( 'ABSPATH' ) || ! current_user_can( 'manage_options' ) ) { exit; }
-$tabs = array( 'common' => 'عمومی و اعلان‌ها', 'smsir' => 'SMS.ir', 'ippanel' => 'مدیرپیامک', 'webhook' => 'Webhook', 'tools' => 'آزمون و گزارش' );
+$tabs = array( 'common' => 'عمومی و اعلان‌ها', 'smsir' => 'SMS.ir', 'ippanel' => 'مدیرپیامک', 'webhook' => 'Webhook', 'support' => 'پشتیبانی شبکه‌ها', 'tools' => 'آزمون و مانیتورینگ' );
 $active_tab = isset( $_GET['tab'] ) && array_key_exists( sanitize_key( $_GET['tab'] ), $tabs ) ? sanitize_key( $_GET['tab'] ) : 'common';
 ?>
 <div class="wrap revayat-sms-settings">
 	<h1>پیامک روایت ایران</h1>
-	<p>تنظیمات هر سرویس جدا ذخیره می‌شود. تغییر درگاه دستی است؛ اعلان‌ها تا فعال‌کردن شما ارسال نمی‌شوند.</p>
+	<p>تنظیمات هر سرویس جدا ذخیره می‌شود. در صورت اختلال درگاه‌های پیامکی، کد تایید به‌طور خودکار از طریق ایمیل ارسال می‌شود.</p>
 	<nav class="nav-tab-wrapper" aria-label="تنظیمات پیامک">
 		<?php foreach ( $tabs as $key => $label ) : ?>
 			<a class="nav-tab<?php echo $key === $active_tab ? ' nav-tab-active' : ''; ?>" data-sms-tab="<?php echo esc_attr( $key ); ?>" href="?page=revayat-sms&amp;tab=<?php echo esc_attr( $key ); ?>"><?php echo esc_html( $label ); ?></a>
@@ -15,7 +15,7 @@ $active_tab = isset( $_GET['tab'] ) && array_key_exists( sanitize_key( $_GET['ta
 	<form method="post" action="options.php">
 		<?php settings_fields( 'revayat_sms' ); ?>
 		<input type="hidden" name="_rv_active_tab" id="rv-sms-active-tab-field" value="<?php echo esc_attr( $active_tab ); ?>">
-		<?php foreach ( array( 'common', 'smsir', 'ippanel', 'webhook' ) as $group ) : ?>
+		<?php foreach ( array( 'common', 'smsir', 'ippanel', 'webhook', 'support' ) as $group ) : ?>
 			<section id="rv-sms-panel-<?php echo esc_attr( $group ); ?>" data-sms-panel="<?php echo esc_attr( $group ); ?>"<?php echo $group !== $active_tab ? ' hidden' : ''; ?>>
 				<h2><?php echo esc_html( $tabs[ $group ] ); ?></h2>
 				<?php do_settings_sections( 'revayat-sms-' . $group ); ?>
@@ -24,6 +24,24 @@ $active_tab = isset( $_GET['tab'] ) && array_key_exists( sanitize_key( $_GET['ta
 		<?php submit_button( 'ذخیره تنظیمات همه سرویس‌ها' ); ?>
 	</form>
 	<section id="rv-sms-panel-tools" data-sms-panel="tools"<?php echo 'tools' !== $active_tab ? ' hidden' : ''; ?>>
+		<h2>وضعیت مانیتورینگ سلامت سرویس پیامک (Circuit Breaker)</h2>
+		<?php
+		$sms_health = class_exists( 'Revayat_Companion_OTP_Service' ) ? Revayat_Companion_OTP_Service::get_sms_health() : array();
+		$is_healthy = 'healthy' === ( $sms_health['status'] ?? 'healthy' );
+		?>
+		<div style="background:#fff;border:1px solid #c3c4c7;border-radius:6px;padding:16px;margin-bottom:20px;max-width:700px;">
+			<p style="margin:0 0 10px 0;font-size:14px;">
+				<strong>وضعیت سامانه پیامک:</strong>
+				<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-weight:bold;color:#fff;background:<?php echo $is_healthy ? '#16a34a' : '#dc2626'; ?>;">
+					<?php echo $is_healthy ? 'پایدار و فعال (Healthy)' : 'دارای اختلال — سوئیچ خودکار به ایمیل فعال (Degraded)'; ?>
+				</span>
+			</p>
+			<p style="margin:0 0 8px 0;color:#64748b;font-size:13px;">تعداد خطاهای متوالی اخیر: <strong><?php echo esc_html( (string) ( $sms_health['consecutive_failures'] ?? 0 ) ); ?></strong></p>
+			<?php if ( ! empty( $sms_health['last_error'] ) ) : ?>
+				<p style="margin:0;color:#b91c1c;font-size:12px;">آخرین خطای ثبت‌شده در مانیتورینگ: <code><?php echo esc_html( $sms_health['last_error'] ); ?></code></p>
+			<?php endif; ?>
+		</div>
+
 		<h2>آزمون اتصال و ارسال</h2>
 		<p>تنظیمات را ابتدا ذخیره کنید. آزمون اتصال پیامک نمی‌فرستد؛ ارسال آزمایشی واقعی و هزینه‌دار است.</p>
 		<p><label>سرویس <select id="rv-sms-test-provider"><?php foreach ( self::providers() as $key => $label ) : if ( 'disabled' === $key ) { continue; } ?><option value="<?php echo esc_attr( $key ); ?>"><?php echo esc_html( $label ); ?></option><?php endforeach; ?></select></label>
