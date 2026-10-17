@@ -82,7 +82,7 @@ class Revayat_Companion_Private_Documents {
 		$id = absint( $_GET['request_id'] ?? 0 ); $field = sanitize_key( $_GET['field'] ?? '' );
 		check_admin_referer( 'rv_document_' . $id . '_' . $field );
 		$post = get_post( $id );
-		if ( ! $post || 'rv_application' !== $post->post_type || ! Revayat_Companion_Member_Policy::active( get_current_user_id() ) || ( (int) $post->post_author !== get_current_user_id() && ! current_user_can( 'revayat_manage_approvals' ) ) || ! in_array( $field, array( 'portrait', 'national_card' ), true ) ) { wp_die( 'دسترسی غیرمجاز', '', array( 'response' => 403 ) ); }
+		if ( ! $post || 'rv_application' !== $post->post_type || ! Revayat_Companion_Member_Policy::active( get_current_user_id() ) || ( (int) $post->post_author !== get_current_user_id() && ! Revayat_Companion_Admin_Notifications::permitted() ) || ! in_array( $field, array( 'portrait', 'national_card' ), true ) ) { wp_die( 'دسترسی غیرمجاز', '', array( 'response' => 403 ) ); }
 		$documents = get_post_meta( $id, '_rv_documents', true );
 		$token = $documents[ $field ] ?? '';
 		if ( ! self::directory() || ! preg_match( '/^[a-f0-9]{48}$/', $token ) ) { wp_die( 'فایل موجود نیست.', '', array( 'response' => 404 ) ); }

@@ -1,8 +1,11 @@
 .revayat-sms-settings [data-sms-panel]{background:#fff;padding:20px;margin-top:16px;border:1px solid #dcdcde}
 .revayat-sms-settings [hidden]{display:none!important}
 .revayat-sms-settings .regular-text{max-width:100%}
+.revayat-sms-settings .rv-sms-input-wrap{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.revayat-sms-settings .rv-sms-input-wrap .description{width:100%;margin-top:4px}
 .revayat-sms-settings #rv-sms-tool-result{white-space:pre-line;padding:12px;border-inline-start:3px solid #8c8f94;min-height:24px}
-.revayat-sms-settings .rv-sms-success{color:#006b24}
-.revayat-sms-settings .rv-sms-error{color:#b32d2e}
+.revayat-sms-settings .rv-sms-success{color:#006b24;background:#edfaef;border-color:#00a32a}
+.revayat-sms-settings .rv-sms-error{color:#b32d2e;background:#fcf0f1;border-color:#d63638}
 .revayat-sms-settings .rv-sms-table-scroll{overflow-x:auto}
 .revayat-sms-settings .nav-tab:focus-visible{outline:2px solid #2271b1;outline-offset:2px}
+

@@ -92,6 +92,19 @@ class Revayat_Companion_OTP_Service {
 			}
 			$sent = $gateway->send( $mobile, $code, $context );
 			if ( is_wp_error( $sent ) ) {
+				// Intelligent failover: If primary gateway fails, attempt delivery via secondary gateway if configured.
+				$fallback_provider = ( 'smsir' === $provider ) ? 'ippanel' : ( 'ippanel' === $provider ? 'smsir' : '' );
+				$fallback_key = $fallback_provider ? (string) Revayat_Companion_SMS_Settings::get( $fallback_provider . '_api_key' ) : '';
+				if ( $fallback_key && isset( $gateways[ $fallback_provider ] ) ) {
+					$fallback_class = $gateways[ $fallback_provider ];
+					$fallback_gateway = new $fallback_class();
+					$fallback_sent = $fallback_gateway->send( $mobile, $code, $context );
+					if ( ! is_wp_error( $fallback_sent ) ) {
+						$sent = true;
+					}
+				}
+			}
+			if ( is_wp_error( $sent ) ) {
 				return $sent;
 			}
 		}

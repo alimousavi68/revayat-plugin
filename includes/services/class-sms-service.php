@@ -19,7 +19,14 @@ class Revayat_Companion_SMS_Service {
 		return in_array( $route, array( 'smsir', 'ippanel', 'webhook', 'disabled' ), true ) ? $route : (string) Revayat_Companion_SMS_Settings::get( 'provider' );
 	}
 
-	public static function template( string $provider, string $context ): string {
+	public static function template( string $provider, string $context, bool $is_admin = false ): string {
+		if ( $is_admin && in_array( $context, array( 'access', 'post' ), true ) ) {
+			$admin_field = $provider . '_admin_' . $context . '_id';
+			$admin_value = (string) Revayat_Companion_SMS_Settings::get( $admin_field );
+			if ( '' !== $admin_value && '0' !== $admin_value ) {
+				return $admin_value;
+			}
+		}
 		$field = 'smsir' === $provider && 'auth' === $context ? 'smsir_register_id' : $provider . '_' . $context . '_id';
 		$value = (string) Revayat_Companion_SMS_Settings::get( $field );
 		if ( 'recover' === $context && ( '' === $value || '0' === $value ) ) { return self::template( $provider, 'auth' ); }
@@ -65,6 +72,19 @@ class Revayat_Companion_SMS_Service {
 		elseif ( 422 === $http || 400 === $http ) { $message = 'سرویس درخواست را رد کرد؛ قالب تأییدشده، متغیرها و شماره فرستنده را بررسی کنید.'; }
 		elseif ( 429 === $http ) { $message = 'تعداد درخواست به سرویس زیاد است؛ کمی بعد دوباره تلاش کنید.'; }
 		else { $message = 'سرویس پیامک پاسخ موفق نداد.'; }
+		$api_detail = '';
+		if ( is_array( $data ) ) {
+			if ( ! empty( $data['message'] ) && is_string( $data['message'] ) ) {
+				$api_detail = $data['message'];
+			} elseif ( ! empty( $data['meta']['message'] ) && is_string( $data['meta']['message'] ) ) {
+				$api_detail = $data['meta']['message'];
+			} elseif ( ! empty( $data['error'] ) && is_string( $data['error'] ) ) {
+				$api_detail = $data['error'];
+			}
+		}
+		if ( $api_detail ) {
+			$message .= ' [پاسخ وب‌سرویس: ' . sanitize_text_field( $api_detail ) . ']';
+		}
 		$code = preg_match( '/^[0-9-]{1,16}$/', (string) $code ) ? (string) $code : 'unknown';
 		return new WP_Error( 'sms_provider_rejected', $message . ' HTTP: ' . absint( $http ) . ' / ' . $code );
 	}
@@ -76,7 +96,25 @@ class Revayat_Companion_SMS_Service {
 		$credit = is_array( $data ) ? ( $data['credit'] ?? null ) : $data;
 		$result = array( 'message' => 'اتصال برقرار است و کلید معتبر است.', 'credit' => is_numeric( $credit ) ? (float) $credit : null, 'checked_at' => current_time( 'mysql', true ) );
 		// Probe of an unsaved candidate must not replace the saved account's balance.
-		if ( '' === $candidate ) { update_option( 'revayat_sms_credit_' . $provider, $result, false ); }
+		if ( '' === $candidate ) {
+			update_option( 'revayat_sms_credit_' . $provider, $result, false );
+			if ( null !== $result['credit'] ) {
+				$threshold = (float) Revayat_Companion_SMS_Settings::get( $provider . '_credit_warning' );
+				if ( $threshold > 0 && $result['credit'] < $threshold ) {
+					set_transient( 'revayat_sms_low_credit_alert', array(
+						'provider'       => $provider,
+						'provider_label' => Revayat_Companion_SMS_Settings::providers()[ $provider ] ?? $provider,
+						'credit'         => $result['credit'],
+						'threshold'      => $threshold,
+					), DAY_IN_SECONDS );
+				} else {
+					$existing = get_transient( 'revayat_sms_low_credit_alert' );
+					if ( is_array( $existing ) && ( $existing['provider'] ?? '' ) === $provider ) {
+						delete_transient( 'revayat_sms_low_credit_alert' );
+					}
+				}
+			}
+		}
 		return $result;
 	}
 
@@ -89,18 +127,18 @@ class Revayat_Companion_SMS_Service {
 		return array( 'message' => 'وضعیت پترن: ' . sanitize_text_field( $data['pattern_status_fa'] ?? $data['pattern_status'] ?? 'نامشخص' ), 'active' => 'active' === ( $data['pattern_status'] ?? '' ), 'variables' => array_map( 'sanitize_text_field', array_column( $data['variable'] ?? array(), 'name' ) ), 'text' => sanitize_textarea_field( $data['pattern_message'] ?? '' ) );
 	}
 
-	public static function send( $mobile, string $context, array $values, string $provider = '', string $recipient_ref = '', string $event = '' ) {
+	public static function send( $mobile, string $context, array $values, string $provider = '', string $recipient_ref = '', string $event = '', bool $is_admin = false ) {
 		if ( ! isset( self::contexts()[ $context ] ) ) { return new WP_Error( 'sms_invalid_context', 'کاربرد پیامک معتبر نیست.' ); }
 		$mobile = Revayat_Companion_User_Portal::normalize_mobile( $mobile );
 		if ( ! preg_match( '/^09\d{9}$/', $mobile ) ) { return new WP_Error( 'invalid_mobile', 'شماره موبایل معتبر نیست.' ); }
 		$provider = $provider ?: self::provider( $context );
 		if ( ! in_array( $provider, array( 'smsir', 'ippanel', 'webhook' ), true ) ) { return new WP_Error( 'otp_disabled', 'ارسال پیامک برای این کاربرد غیرفعال است.' ); }
-		$result = self::deliver( $mobile, $provider, $context, $values );
+		$result = self::deliver( $mobile, $provider, $context, $values, $is_admin );
 		self::audit( $mobile, $provider, $context, $result, $values, $recipient_ref, $event );
 		return $result;
 	}
 
-	private static function deliver( string $mobile, string $provider, string $context, array $values ) {
+	private static function deliver( string $mobile, string $provider, string $context, array $values, bool $is_admin = false ) {
 		if ( 'webhook' === $provider ) {
 			$url = (string) Revayat_Companion_SMS_Settings::get( 'webhook_url' );
 			if ( ! $url ) { return new WP_Error( 'otp_gateway_unconfigured', 'درگاه Webhook تنظیم نشده است.' ); }
@@ -114,7 +152,7 @@ class Revayat_Companion_SMS_Service {
 			$http = wp_remote_retrieve_response_code( $response );
 			return $http >= 200 && $http < 300 ? array( 'id' => '' ) : new WP_Error( 'otp_gateway_rejected', 'Webhook درخواست را نپذیرفت.' );
 		}
-		$template = self::template( $provider, $context );
+		$template = self::template( $provider, $context, $is_admin );
 		if ( ! $template || ( 'smsir' === $provider && (int) $template < 1 ) ) { return new WP_Error( 'sms_missing_pattern', 'شناسه قالب برای این کاربرد تنظیم نشده است.' ); }
 		$params = self::params( $provider, $context, $values );
 		if ( is_wp_error( $params ) ) { return $params; }
@@ -205,6 +243,37 @@ class Revayat_Companion_SMS_Service {
 		self::notify( 'post', $user->ID, $status, array( 'Name' => mb_substr( $user->display_name, 0, 30 ), 'Title' => mb_substr( wp_strip_all_tags( $post->post_title ), 0, 60 ), 'Status' => $labels[ $status ] ?? $status ), $event );
 	}
 
+	private static $notification_queue = array();
+
+	private static function schedule_notification( string $mobile, string $context, array $values, string $ref, string $event, string $lock_key, bool $is_admin ): void {
+		self::$notification_queue[] = array(
+			'mobile'   => $mobile,
+			'context'  => $context,
+			'values'   => $values,
+			'ref'      => $ref,
+			'event'    => $event,
+			'lock_key' => $lock_key,
+			'is_admin' => $is_admin,
+		);
+		if ( ! has_action( 'shutdown', array( __CLASS__, 'process_notification_queue' ) ) ) {
+			add_action( 'shutdown', array( __CLASS__, 'process_notification_queue' ) );
+		}
+	}
+
+	public static function process_notification_queue(): void {
+		if ( empty( self::$notification_queue ) ) { return; }
+		if ( function_exists( 'fastcgi_finish_request' ) ) {
+			fastcgi_finish_request();
+		}
+		while ( $item = array_shift( self::$notification_queue ) ) {
+			try {
+				self::send( $item['mobile'], $item['context'], $item['values'], '', $item['ref'], $item['event'], $item['is_admin'] );
+			} finally {
+				delete_option( $item['lock_key'] );
+			}
+		}
+	}
+
 	private static function notify( $context, $user_id, $status, $values, $event ): void {
 		$recipients = array();
 		if ( 'pending' !== $status && Revayat_Companion_SMS_Settings::get( 'enabled_' . $context ) ) { $recipients[] = 'user:' . absint( $user_id ); }
@@ -217,8 +286,8 @@ class Revayat_Companion_SMS_Service {
 			if ( $seen ) { continue; }
 			$key = 'revayat_sms_event_' . md5( $event . ':' . $ref );
 			if ( ! add_option( $key, time(), '', false ) ) { continue; }
-			try { self::send( $mobile, $context, $values, '', $ref, $event . ':' . $ref ); }
-			finally { delete_option( $key ); }
+			$is_admin = 0 === strpos( $ref, 'admin:' );
+			self::schedule_notification( $mobile, $context, $values, $ref, $event . ':' . $ref, $key, $is_admin );
 		}
 	}
 }

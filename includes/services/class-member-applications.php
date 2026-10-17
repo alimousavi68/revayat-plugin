@@ -85,6 +85,7 @@ class Revayat_Companion_Member_Applications {
 		update_post_meta( $id, '_rv_state', $state ); update_post_meta( $id, '_rv_version', $version );
 		$event = $id . ':' . $version;
 		add_post_meta( $id, '_rv_history', array( 'from' => $before, 'to' => $state, 'actor' => $actor, 'at' => current_time( 'mysql', true ), 'reason' => $reason, 'event' => $event ) );
+		do_action( 'revayat_application_transitioned', $id, $before, $state, $version, $actor );
 		if ( $reason ) { update_post_meta( $id, '_rv_feedback', $reason ); }
 		if ( 'situation' === $type ) {
 			update_user_meta( $post->post_author, '_revayat_special_access_status', $state );
@@ -102,7 +103,7 @@ class Revayat_Companion_Member_Applications {
 		}
 	}
 	public static function review( $id, $state, $reason, $version, $reviewer ) {
-		if ( ! user_can( $reviewer, 'revayat_manage_approvals' ) || ! Revayat_Companion_Member_Policy::active( $reviewer ) ) { return new WP_Error( 'forbidden', 'مجوز بررسی ندارید.' ); }
+		if ( ! Revayat_Companion_Admin_Notifications::can_manage( $reviewer ) ) { return new WP_Error( 'forbidden', 'مجوز بررسی ندارید.' ); }
 		$post = get_post( $id );
 		if ( ! $post || 'rv_application' !== $post->post_type || (int) $post->post_author === (int) $reviewer ) { return new WP_Error( 'not_found', 'درخواست یافت نشد.' ); }
 		$type = get_post_meta( $id, '_rv_type', true );

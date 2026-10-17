@@ -468,9 +468,13 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 
 				$is_item_accessible = $can_download && $has_item_clearance;
 
-				$item_url      = $is_item_accessible ? (string) ( $att['url'] ?? '' ) : '';
+				$item_url      = $is_item_accessible ? Revayat_Companion_Situation_Media::reference_url( absint( $att['id'] ?? 0 ), (string) ( $att['url'] ?? '' ) ) : '';
+				$media_unavailable = $is_item_accessible && '' === $item_url;
+				$is_item_accessible = $is_item_accessible && '' !== $item_url;
 				$security_note = '';
-				if ( ! $is_item_accessible ) {
+				if ( $media_unavailable ) {
+					$security_note = 'رسانه خصوصی هنوز آماده نشده است.';
+				} elseif ( ! $is_item_accessible ) {
 					$security_note = ( 'guest' === $user_clearance ) ? 'نیازمند ورود به حساب کاربری' : 'نیازمند سطح دسترسی ۱ (عالی)';
 				} elseif ( $is_view_only ) {
 					$security_note = 'فقط مشاهده برخط (واترمارک شده)';
@@ -528,12 +532,15 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 				}
 
 				$is_item_accessible = $can_view && $has_item_clearance;
+				$private_url = $is_item_accessible ? Revayat_Companion_Situation_Media::reference_url( absint( $item['id'] ?? 0 ), (string) ( $item['url'] ?? '' ) ) : '';
+				$private_thumb = $private_url ? Revayat_Companion_Situation_Media::reference_url( absint( $item['id'] ?? 0 ), (string) ( $item['url'] ?? '' ), 'thumbnail' ) : '';
+				$is_item_accessible = $is_item_accessible && '' !== $private_url;
 
 				$items[] = array(
 					'id'           => (int) ( $item['id'] ?? 0 ),
 					'sensor_label' => (string) ( $item['sensor_label'] ?? 'SENSOR' ),
-					'url'          => $is_item_accessible ? (string) ( $item['url'] ?? '' ) : '',
-					'thumb_url'    => $is_item_accessible ? (string) ( $item['thumb_url'] ?? ( $item['url'] ?? '' ) ) : '',
+					'url'          => $private_url,
+					'thumb_url'    => $private_thumb,
 					'caption'      => $is_item_accessible ? (string) ( $item['caption'] ?? '' ) : 'تصویر طبقه‌بندی شده',
 					'timestamp'    => (string) ( $item['timestamp'] ?? '' ),
 					'coordinates'  => (string) ( $item['coordinates'] ?? '' ),

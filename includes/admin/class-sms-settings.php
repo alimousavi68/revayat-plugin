@@ -9,7 +9,14 @@ class Revayat_Companion_SMS_Settings {
 		return array( 'smsir' => 'SMS.ir', 'ippanel' => 'مدیرپیامک / IPPanel', 'webhook' => 'Webhook', 'disabled' => 'غیرفعال' );
 	}
 	public static function defaults(): array {
-		$defaults = array( 'provider' => 'smsir', 'smsir_api_key' => '', 'smsir_parameter' => 'Code', 'smsir_line_number' => '', 'ippanel_api_key' => '', 'ippanel_sender' => '', 'webhook_url' => '', 'webhook_token' => '', 'webhook_template' => '', 'admin_numbers' => '', 'enabled_access' => 0, 'enabled_post' => 0, 'admin_access' => 0, 'admin_post' => 0, 'smsir_credit_warning' => 0, 'ippanel_credit_warning' => 0 );
+		$defaults = array(
+			'provider' => 'smsir', 'smsir_api_key' => '', 'smsir_parameter' => 'Code', 'smsir_line_number' => '',
+			'smsir_admin_access_id' => 0, 'smsir_admin_post_id' => 0,
+			'ippanel_api_key' => '', 'ippanel_sender' => '', 'ippanel_admin_access_id' => '', 'ippanel_admin_post_id' => '',
+			'webhook_url' => '', 'webhook_token' => '', 'webhook_template' => '',
+			'admin_numbers' => '', 'enabled_access' => 0, 'enabled_post' => 0, 'admin_access' => 0, 'admin_post' => 0,
+			'smsir_credit_warning' => 0, 'ippanel_credit_warning' => 0
+		);
 		foreach ( Revayat_Companion_SMS_Service::contexts() as $context => $label ) {
 			$defaults[ 'route_' . $context ] = '';
 			foreach ( array( 'smsir', 'ippanel' ) as $provider ) {
@@ -37,8 +44,8 @@ class Revayat_Companion_SMS_Settings {
 	private static function fields(): array {
 		$groups = array(
 			'common' => array( 'provider' => 'درگاه پیش‌فرض', 'admin_numbers' => 'موبایل مدیران دریافت‌کننده (حداکثر ۵ شماره)', 'enabled_access' => 'اعلان وضعیت دسترسی به کاربر', 'enabled_post' => 'اعلان وضعیت یادداشت به کاربر', 'admin_access' => 'اطلاع درخواست تازه دسترسی به مدیر', 'admin_post' => 'اطلاع یادداشت در انتظار بررسی به مدیر' ),
-			'smsir' => array( 'smsir_api_key' => 'کلید API', 'smsir_parameter' => 'نام متغیر کد (سازگاری قبلی)', 'smsir_line_number' => 'خط اختیاری؛ در ارسال قالبی مصرف نمی‌شود', 'smsir_credit_warning' => 'آستانه هشدار اعتبار (۰: خاموش)' ),
-			'ippanel' => array( 'ippanel_api_key' => 'کلید API', 'ippanel_sender' => 'شماره فرستنده مجاز با +98', 'ippanel_credit_warning' => 'آستانه هشدار اعتبار (۰: خاموش)' ),
+			'smsir' => array( 'smsir_api_key' => 'کلید API', 'smsir_parameter' => 'نام متغیر کد (سازگاری قبلی)', 'smsir_line_number' => 'خط اختیاری؛ در ارسال قالبی مصرف نمی‌شود', 'smsir_credit_warning' => 'آستانه هشدار اعتبار (۰: خاموش)', 'smsir_admin_access_id' => 'شناسه قالب اختصاصی مدیر: درخواست دسترسی (اختیاری)', 'smsir_admin_post_id' => 'شناسه قالب اختصاصی مدیر: یادداشت تازه (اختیاری)' ),
+			'ippanel' => array( 'ippanel_api_key' => 'کلید API', 'ippanel_sender' => 'شماره فرستنده مجاز با +98', 'ippanel_credit_warning' => 'آستانه هشدار اعتبار (۰: خاموش)', 'ippanel_admin_access_id' => 'کد پترن اختصاصی مدیر: درخواست دسترسی (اختیاری)', 'ippanel_admin_post_id' => 'کد پترن اختصاصی مدیر: یادداشت تازه (اختیاری)' ),
 			'webhook' => array( 'webhook_url' => 'نشانی HTTPS', 'webhook_token' => 'توکن', 'webhook_template' => 'شناسه قالب' ),
 		);
 		foreach ( Revayat_Companion_SMS_Service::contexts() as $context => $label ) {
@@ -55,29 +62,39 @@ class Revayat_Companion_SMS_Settings {
 		register_setting( 'revayat_sms', self::OPTION, array( 'type' => 'array', 'sanitize_callback' => array( __CLASS__, 'sanitize' ), 'default' => self::defaults() ) );
 		add_action( 'wp_ajax_revayat_sms_tool', array( __CLASS__, 'tool' ) );
 		add_action( 'wp_ajax_revayat_test_smsir_connection', array( __CLASS__, 'test_connection' ) );
+		add_action( 'admin_notices', array( __CLASS__, 'credit_notice' ) );
 		foreach ( self::fields() as $group => $fields ) {
 			$page = 'revayat-sms-' . $group;
 			add_settings_section( $page, '', '__return_false', $page );
 			foreach ( $fields as $key => $label ) { add_settings_field( $key, $label, array( __CLASS__, 'field' ), $page, $page, array( 'key' => $key, 'label_for' => 'rv-sms-' . $key ) ); }
 		}
 	}
+	private static string $hook_suffix = '';
+
 	public static function menu(): void {
-		add_options_page( 'تنظیمات پیامک روایت ایران', 'پیامک روایت ایران', 'manage_options', 'revayat-sms', array( __CLASS__, 'page' ) );
+		self::$hook_suffix = (string) add_options_page( 'تنظیمات پیامک روایت ایران', 'پیامک روایت ایران', 'manage_options', 'revayat-sms', array( __CLASS__, 'page' ) );
 	}
 	public static function enqueue( $hook ): void {
-		if ( 'settings_page_revayat-sms' !== $hook ) { return; }
-		$base = dirname( __DIR__, 2 ) . '/assets/';
-		$url = plugin_dir_url( dirname( __DIR__, 2 ) . '/revayat-companion.php' ) . 'assets/';
+		if ( $hook !== self::$hook_suffix && false === strpos( (string) $hook, 'revayat-sms' ) ) { return; }
+		$base = REVAYAT_COMPANION_PATH . 'assets/';
+		$url  = REVAYAT_COMPANION_URL . 'assets/';
 		wp_enqueue_script( 'revayat-sms-settings', $url . 'sms-settings.js', array(), filemtime( $base . 'sms-settings.js' ), true );
 		wp_enqueue_style( 'revayat-sms-settings', $url . 'sms-settings.css', array(), filemtime( $base . 'sms-settings.css' ) );
 		wp_localize_script( 'revayat-sms-settings', 'revayatSMSTools', array( 'url' => admin_url( 'admin-ajax.php' ), 'nonce' => wp_create_nonce( 'revayat_sms_tools' ) ) );
+	}
+	public static function credit_notice(): void {
+		if ( ! current_user_can( 'manage_options' ) ) { return; }
+		$alert = get_transient( 'revayat_sms_low_credit_alert' );
+		if ( $alert && is_array( $alert ) ) {
+			echo '<div class="notice notice-warning is-dismissible"><p><strong>هشدار پیامک روایت ایران:</strong> اعتبار پنل ' . esc_html( $alert['provider_label'] ?? '' ) . ' به ' . esc_html( (string) ( $alert['credit'] ?? '' ) ) . ' کاهش یافته است (کمتر از آستانه هشدار ' . esc_html( (string) ( $alert['threshold'] ?? '' ) ) . '). لطفاً نسبت به شارژ حساب اقدام فرمایید.</p></div>';
+		}
 	}
 	public static function sanitize( $input ): array {
 		$old = self::all();
 		foreach ( is_array( $input ) ? $input : array() as $key => $value ) {
 			if ( ! array_key_exists( $key, self::defaults() ) || ! is_scalar( $value ) ) { continue; }
 			$value = (string) $value;
-			if ( in_array( $key, array( 'smsir_api_key', 'ippanel_api_key', 'webhook_token' ), true ) ) { if ( trim( $value ) ) { $old[ $key ] = sanitize_text_field( $value ); } }
+			if ( in_array( $key, array( 'smsir_api_key', 'ippanel_api_key', 'webhook_token' ), true ) ) { $old[ $key ] = sanitize_text_field( $value ); }
 			elseif ( 'provider' === $key || 0 === strpos( $key, 'route_' ) ) { $old[ $key ] = isset( self::providers()[ $value ] ) ? $value : ( 'provider' === $key ? 'disabled' : '' ); }
 			elseif ( 0 === strpos( $key, 'enabled_' ) || in_array( $key, array( 'admin_access', 'admin_post' ), true ) ) { $old[ $key ] = empty( $value ) ? 0 : 1; }
 			elseif ( 'admin_numbers' === $key ) {
@@ -119,10 +136,15 @@ class Revayat_Companion_SMS_Settings {
 		} else {
 			$secret = in_array( $key, array( 'smsir_api_key', 'ippanel_api_key', 'webhook_token' ), true );
 			$numeric = ( 0 === strpos( $key, 'smsir_' ) && '_id' === substr( $key, -3 ) ) || false !== strpos( $key, '_credit_warning' );
-			echo '<input class="regular-text" dir="ltr" type="' . ( $secret ? 'password' : ( $numeric ? 'number' : 'text' ) ) . '"' . $attrs . ' value="' . esc_attr( $secret ? '' : $value ) . '" autocomplete="new-password"' . ( $numeric ? ' min="0" step="any"' : '' ) . '>';
-			if ( $secret ) { echo '<p class="description">' . ( self::get( $key ) ? 'کلید تنظیم شده است؛ خالی بگذارید تا حفظ شود.' : 'کلید هنوز تنظیم نشده است.' ) . '</p>'; }
+			echo '<div class="rv-sms-input-wrap">';
+			echo '<input class="regular-text" dir="ltr" type="' . ( $secret ? 'password' : ( $numeric ? 'number' : 'text' ) ) . '"' . $attrs . ' value="' . esc_attr( $value ) . '" autocomplete="new-password"' . ( $numeric ? ' min="0" step="any"' : '' ) . '>';
+			if ( $secret ) {
+				echo ' <button type="button" class="button button-secondary rv-sms-toggle-visibility" data-target="' . esc_attr( $id ) . '" title="نمایش/مخفی‌سازی مقدار">👁 نمایش</button>';
+				echo '<p class="description">' . ( $value ? 'مقدار کلید در سیستم ذخیره شده است. می‌توانید با دکمه بالا آن را مشاهده یا ویرایش کنید.' : 'کلید هنوز تنظیم نشده است.' ) . '</p>';
+			}
+			echo '</div>';
 		}
-		if ( '_recover_id' === substr( $key, -11 ) ) { echo '<p class="description">اختیاری؛ خالی یا صفر باشد از قالب ورود استفاده می‌شود.</p>'; }
+		if ( '_recover_id' === substr( $key, -11 ) || false !== strpos( $key, '_admin_' ) ) { echo '<p class="description">اختیاری؛ خالی یا صفر باشد از قالب عمومی همان بخش استفاده می‌شود.</p>'; }
 		if ( defined( self::constant_name( $key ) ) ) { echo '<p class="description">مقدار سرور اولویت دارد: <code>' . esc_html( self::constant_name( $key ) ) . '</code></p>'; }
 	}
 	private static function respond( $result ): void {
