@@ -1313,7 +1313,8 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 
 			if ( 'analyst_post' === $post_type ) {
 				$person_author = $taxonomies['person_author'] ?? array();
-				$author_name   = ! empty( $person_author['name'] ) ? $person_author['name'] : (string) get_the_author_meta( 'display_name', $post->post_author );
+				$real_name     = (string) get_user_meta( $post->post_author, '_revayat_full_name', true );
+				$author_name   = ! empty( $person_author['name'] ) ? $person_author['name'] : ( $real_name ?: (string) get_the_author_meta( 'display_name', $post->post_author ) );
 				$author_role   = (string) ( $person_author['role'] ?? '' );
 				$author_avatar = $person_author['term_id'] ? $person_author['avatar'] : (string) get_avatar_url( $post->post_author, array( 'size' => 96 ) );
 				$author_url    = ! empty( $person_author['url'] ) ? $person_author['url'] : (string) get_author_posts_url( $post->post_author );
@@ -1587,7 +1588,8 @@ if ( ! class_exists( 'Revayat_Companion_Content_Service' ) ) {
 			// فال‌بک تمیز به نویسنده بومی وردپرس در صورت عدم انتساب ترم
 			if ( empty( $person_author['name'] ) && ! empty( $post->post_author ) ) {
 				$author_id                     = (int) $post->post_author;
-				$person_author['name']         = (string) get_the_author_meta( 'display_name', $author_id );
+				$real_name                     = (string) get_user_meta( $author_id, '_revayat_full_name', true );
+				$person_author['name']         = $real_name ?: (string) get_the_author_meta( 'display_name', $author_id );
 				$person_author['role']         = (string) get_the_author_meta( 'headline', $author_id );
 				$person_author['avatar']       = (string) get_avatar_url( $author_id, array( 'size' => 96 ) );
 				$person_author['url']          = (string) get_author_posts_url( $author_id );

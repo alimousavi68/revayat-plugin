@@ -7,7 +7,7 @@ class Revayat_Companion_Member_Profile {
 		if ( ! $user || ( get_current_user_id() !== (int) $user_id && ! current_user_can( 'edit_user', $user_id ) ) ) { return array(); }
 		$person = absint( get_user_meta( $user_id, '_revayat_person_id', true ) );
 		$data = array( 'display_name' => $user->display_name, 'full_name' => get_user_meta( $user_id, '_revayat_full_name', true ), 'avatar_url' => get_avatar_url( $user_id ), 'version' => (int) get_user_meta( $user_id, '_rv_profile_version', true ) );
-		foreach ( array( 'role_title', 'organization', 'expertise', 'bio' ) as $field ) {
+		foreach ( array( 'role_title', 'organization', 'expertise', 'referrer', 'bio' ) as $field ) {
 			$value = get_user_meta( $user_id, '_revayat_' . $field, true );
 			$data[ $field ] = $value ?: ( $person ? ( 'bio' === $field ? get_post_field( 'post_content', $person ) : get_post_meta( $person, '_revayat_' . $field, true ) ) : '' );
 		}
@@ -19,29 +19,37 @@ class Revayat_Companion_Member_Profile {
 			$version = (int) get_user_meta( $user_id, '_rv_profile_version', true );
 			if ( (int) ( $input['version'] ?? -1 ) !== $version ) { return new WP_Error( 'conflict', 'اطلاعات در پنجره دیگری تغییر کرده است؛ صفحه را تازه کنید.' ); }
 			$data = array();
-			foreach ( array( 'display_name', 'full_name', 'role_title', 'organization', 'expertise', 'bio' ) as $field ) {
+			foreach ( array( 'full_name', 'role_title', 'organization', 'expertise', 'referrer', 'bio' ) as $field ) {
 				$data[ $field ] = 'bio' === $field ? sanitize_textarea_field( $input[ $field ] ?? '' ) : sanitize_text_field( $input[ $field ] ?? '' );
 				$limit = 'bio' === $field ? 3000 : 160;
 				if ( mb_strlen( $data[ $field ] ) > $limit ) {
-					$labels = array( 'display_name' => 'نام نمایشی', 'full_name' => 'نام و نام خانوادگی', 'role_title' => 'عنوان شغلی', 'organization' => 'سازمان', 'expertise' => 'حوزه‌های تخصصی', 'bio' => 'معرفی کوتاه' );
+					$labels = array( 'full_name' => 'نام و نام خانوادگی', 'role_title' => 'عنوان شغلی', 'organization' => 'سازمان', 'expertise' => 'حوزه‌های تخصصی', 'referrer' => 'معرف', 'bio' => 'بیوگرافی' );
 					return new WP_Error( 'profile_invalid', sprintf( '%s باید حداکثر %d نویسه باشد.', $labels[ $field ], $limit ), array( 'field' => $field ) );
 				}
 			}
 			if ( mb_strlen( $data['full_name'] ) < 3 ) { return new WP_Error( 'profile_invalid', 'نام و نام خانوادگی را کامل وارد کنید؛ حداقل ۳ نویسه.', array( 'field' => 'full_name' ) ); }
-			if ( mb_strlen( $data['display_name'] ) < 2 ) { return new WP_Error( 'profile_invalid', 'نام نمایشی را وارد کنید؛ حداقل ۲ نویسه.', array( 'field' => 'display_name' ) ); }
+			if ( mb_strlen( trim( $data['bio'] ) ) < 10 ) { return new WP_Error( 'profile_invalid', 'بیوگرافی را وارد کنید؛ حداقل ۱۰ نویسه.', array( 'field' => 'bio' ) ); }
 			// Validate/upload first; invalid images must not partially save textual fields.
 			$result = Revayat_Companion_Profile_Avatar::upload( $user_id );
 			if ( is_wp_error( $result ) ) { return $result; }
-			$result = wp_update_user( array( 'ID' => $user_id, 'display_name' => $data['display_name'] ) );
+			$name_parts = explode( ' ', trim( $data['full_name'] ), 2 );
+			$first_name = $name_parts[0] ?? '';
+			$last_name  = $name_parts[1] ?? '';
+			$result     = wp_update_user( array(
+				'ID'           => $user_id,
+				'display_name' => $data['full_name'],
+				'first_name'   => $first_name,
+				'last_name'    => $last_name,
+			) );
 			if ( is_wp_error( $result ) ) { return $result; }
-			foreach ( $data as $field => $value ) { if ( 'display_name' !== $field ) { update_user_meta( $user_id, '_revayat_' . $field, $value ); } }
+			foreach ( $data as $field => $value ) { update_user_meta( $user_id, '_revayat_' . $field, $value ); }
 			$person = absint( get_user_meta( $user_id, '_revayat_person_id', true ) );
 			if ( ! empty( $input['remove_avatar'] ) && empty( $_FILES['profile_avatar']['size'] ) ) {
 				delete_user_meta( $user_id, '_revayat_avatar_id' );
 				if ( $person ) { delete_post_thumbnail( $person ); delete_post_meta( $person, '_revayat_avatar_id' ); }
 			}
 			if ( $person && 'person' === get_post_type( $person ) ) {
-				wp_update_post( array( 'ID' => $person, 'post_title' => $data['display_name'], 'post_content' => $data['bio'] ) );
+				wp_update_post( array( 'ID' => $person, 'post_title' => $data['full_name'], 'post_content' => $data['bio'] ) );
 				foreach ( array( 'role_title', 'organization', 'expertise' ) as $field ) { update_post_meta( $person, '_revayat_' . $field, $data[ $field ] ); }
 			}
 			update_user_meta( $user_id, '_rv_profile_version', $version + 1 );
