@@ -34,14 +34,15 @@ class Revayat_Companion_Member_Notes {
 			if ( $post && ( 'draft' !== $post->post_status || ! in_array( $review, array( '', 'draft', 'changes_requested', 'rejected' ), true ) ) ) { return new WP_Error( 'locked', 'این یادداشت قفل است؛ ابتدا وضعیت بررسی آن را پیگیری کنید.' ); }
 			$title = sanitize_text_field( $input['post_title'] ?? '' ); $content = wp_kses_post( $input['post_content'] ?? '' );
 			if ( mb_strlen( $title ) < 5 || mb_strlen( wp_strip_all_tags( $content ) ) < ( 'submit' === $mode ? 50 : 1 ) || mb_strlen( $content ) > 200000 ) { return new WP_Error( 'invalid_post', 'عنوان حداقل ۵ نویسه و متن ارسالی حداقل ۵۰ نویسه لازم دارد.' ); }
-			$person = absint( get_user_meta( $user_id, '_revayat_person_id', true ) );
-			if ( ! $person || 'person' !== get_post_type( $person ) ) { return new WP_Error( 'missing_person', 'پروفایل حرفه‌ای حساب هنوز متصل نیست؛ با مدیریت تماس بگیرید.' ); }
-			$term = Revayat_Companion_Person_Identity::ensure_term_for_person( $person ); if ( is_wp_error( $term ) ) { return $term; }
-			// Always persist as private draft until the author relationship is secured.
 			$result = wp_insert_post( array( 'ID' => $id, 'post_type' => 'analyst_post', 'post_status' => 'draft', 'post_author' => $user_id, 'post_title' => $title, 'post_content' => $content, 'post_excerpt' => sanitize_textarea_field( $input['post_excerpt'] ?? '' ), 'comment_status' => 'open' ), true );
 			if ( is_wp_error( $result ) ) { return $result; }
-			$assigned = wp_set_object_terms( $result, array( $term ), 'person_author' );
-			if ( is_wp_error( $assigned ) ) { if ( ! $id ) { wp_delete_post( $result, true ); } return $assigned; }
+			$person = absint( get_user_meta( $user_id, '_revayat_person_id', true ) );
+			if ( $person && 'person' === get_post_type( $person ) ) {
+				$term = Revayat_Companion_Person_Identity::ensure_term_for_person( $person );
+				if ( ! is_wp_error( $term ) ) {
+					wp_set_object_terms( $result, array( $term ), 'person_author' );
+				}
+			}
 			$field = absint( $input['analyst_field'] ?? 0 );
 			if ( $field && term_exists( $field, 'analyst_field' ) ) { wp_set_object_terms( $result, array( $field ), 'analyst_field' ); }
 			update_post_meta( $result, '_revayat_review_status', 'submit' === $mode ? 'pending' : 'draft' );

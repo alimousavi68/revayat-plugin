@@ -2,7 +2,7 @@
 /** Native reading-page widget with safe, configurable content selection. */
 if (!defined('ABSPATH')) { exit; }
 class Revayat_Companion_Contextual_Widget extends WP_Widget {
-    const MODES = ['other_dossiers' => 'سایر پرونده‌های ویژه', 'related' => 'مطالب هم‌موضوع', 'dossier' => 'مطالب همین پرونده', 'parents' => 'پرونده‌های این مطلب', 'recent' => 'تازه‌ترین مطالب'];
+    const MODES = ['other_dossiers' => 'پرونده‌های ویژه', 'related' => 'مطالب هم‌موضوع', 'dossier' => 'مطالب همین پرونده', 'parents' => 'پرونده‌های این مطلب', 'recent' => 'تازه‌ترین مطالب'];
     const STYLES = ['compact' => 'ردیف فشرده با عکس افقی', 'featured' => 'یک کارت تصویری و ادامه فشرده'];
     const SOURCES = ['auto' => 'متناسب با صفحه', 'post' => 'نوشته‌ها', 'analyst_post' => 'تحلیل‌ها', 'multimedia' => 'چندرسانه‌ای', 'special_dossier' => 'پرونده‌های ویژه'];
     public function __construct() {
@@ -102,10 +102,11 @@ class Revayat_Companion_Contextual_Widget extends WP_Widget {
     }
     /** Apply the requested sidebar cleanup once; retain inactive widget settings. */
     public static function refine_sidebars(): void {
-        if (get_stylesheet() !== 'revayatiran' || !current_user_can('edit_theme_options') || get_option('revayat_single_sidebar_refined_v2')) { return; }
+        if (get_stylesheet() !== 'revayatiran' || !current_user_can('edit_theme_options') || get_option('revayat_single_sidebar_refined_v3')) { return; }
         $areas = get_option('sidebars_widgets', []);
         $widgets = get_option('widget_revayat_contextual', []);
         $blocks = get_option('widget_block', []);
+        $next = static function ($options): int { $keys = array_filter(array_keys($options), 'is_int'); return $keys ? max($keys) + 1 : 2; };
         foreach ($areas as $area => $ids) {
             if (!is_array($ids) || $area === 'wp_inactive_widgets') { continue; }
             $keep = [];
@@ -115,47 +116,102 @@ class Revayat_Companion_Contextual_Widget extends WP_Widget {
                 if (preg_match('/^revayat_contextual-(\d+)$/', $name, $m)) {
                     $id = (int) $m[1]; $mode = $widgets[$id]['mode'] ?? '';
                     if ($area === 'single-special_dossier-sidebar' && in_array($mode, ['dossier', 'other_dossiers', 'related', 'recent'], true)) { continue; }
+                    if ($mode === 'other_dossiers' && ($widgets[$id]['title'] ?? '') === 'سایر پرونده‌های ویژه') {
+                        $widgets[$id]['title'] = 'پرونده‌های ویژه';
+                    }
                     if (str_starts_with($area, 'single-') && $mode === 'dossier') {
-                        $widgets[$id] = array_merge($widgets[$id], ['mode' => 'other_dossiers', 'title' => 'سایر پرونده‌های ویژه', 'style' => 'compact']);
+                        $widgets[$id] = array_merge($widgets[$id], ['mode' => 'other_dossiers', 'title' => 'پرونده‌های ویژه', 'style' => 'compact']);
                     }
                 }
                 $keep[] = $name;
             }
+            if (in_array($area, ['single-post-sidebar', 'single-multimedia-sidebar'], true) && count($keep) > 1) {
+                $parents_w = [];
+                $related_w = [];
+                $other_w = [];
+                $rest_w = [];
+                foreach ($keep as $w_name) {
+                    if (preg_match('/^revayat_contextual-(\d+)$/', $w_name, $m)) {
+                        $wid = (int) $m[1];
+                        $m_type = $widgets[$wid]['mode'] ?? '';
+                        if ($m_type === 'parents') { $parents_w[] = $w_name; }
+                        elseif ($m_type === 'related') { $related_w[] = $w_name; }
+                        elseif ($m_type === 'other_dossiers') { $other_w[] = $w_name; }
+                        else { $rest_w[] = $w_name; }
+                    } else {
+                        $rest_w[] = $w_name;
+                    }
+                }
+                $keep = array_merge($parents_w, $related_w, $other_w, $rest_w);
+            }
             $areas[$area] = $keep;
+        }
+        if (empty($areas['single-analyst_post-sidebar'])) {
+            $areas['single-analyst_post-sidebar'] = [];
+            $nid = $next($widgets);
+            $widgets[$nid] = array_merge(self::defaults(), ['title' => 'تحلیل‌های مرتبط', 'mode' => 'related', 'source' => 'analyst_post', 'number' => 3, 'style' => 'compact']);
+            $areas['single-analyst_post-sidebar'][] = 'revayat_contextual-' . $nid;
         }
         update_option('widget_revayat_contextual', $widgets);
         update_option('sidebars_widgets', $areas);
-        update_option('revayat_single_sidebar_refined_v2', 1, false);
+        update_option('revayat_single_sidebar_refined_v3', 1, false);
     }
     /** One-time editable starter layout; never recreates widgets removed by the operator. */
     public static function seed_defaults(): void {
-        if (get_stylesheet() !== 'revayatiran' || !current_user_can('edit_theme_options') || get_option('revayat_single_widgets_initialized_v1')) { return; }
+        if (get_stylesheet() !== 'revayatiran' || !current_user_can('edit_theme_options') || get_option('revayat_single_widgets_initialized_v2')) { return; }
         $sidebars = get_option('sidebars_widgets', []);
         $widgets = get_option('widget_revayat_contextual', ['_multiwidget' => 1]);
         $search = get_option('widget_search', ['_multiwidget' => 1]);
         $next = static function ($options): int { $keys = array_filter(array_keys($options), 'is_int'); return $keys ? max($keys) + 1 : 2; };
-        foreach (['post', 'analyst_post', 'multimedia', 'special_dossier'] as $type) {
-            $area = 'single-' . $type . '-sidebar';
-            if (!empty($sidebars[$area])) { continue; }
-            $sidebars[$area] = [];
-            if ($type !== 'special_dossier') {
-                $id = $next($widgets);
-                $widgets[$id] = array_merge(self::defaults(), ['title' => 'پرونده‌های این مطلب', 'mode' => 'parents', 'number' => 3, 'style' => 'featured']);
-                $sidebars[$area][] = 'revayat_contextual-' . $id;
-            }
-            $id = $next($widgets);
-            $widgets[$id] = array_merge(self::defaults(), ['title' => 'سایر پرونده‌های ویژه', 'mode' => 'other_dossiers', 'number' => 3, 'fallback' => false]);
-            $sidebars[$area][] = 'revayat_contextual-' . $id;
-            if ($type !== 'special_dossier') {
-                $id = $next($widgets);
-                $widgets[$id] = array_merge(self::defaults(), ['number' => 3]);
-                $sidebars[$area][] = 'revayat_contextual-' . $id;
-            }
 
+        // 1. single-post-sidebar
+        if (empty($sidebars['single-post-sidebar'])) {
+            $sidebars['single-post-sidebar'] = [];
+            $id = $next($widgets);
+            $widgets[$id] = array_merge(self::defaults(), ['title' => 'پرونده‌های این مطلب', 'mode' => 'parents', 'number' => 3, 'style' => 'featured']);
+            $sidebars['single-post-sidebar'][] = 'revayat_contextual-' . $id;
+
+            $id = $next($widgets);
+            $widgets[$id] = array_merge(self::defaults(), ['title' => 'مطالب مرتبط', 'mode' => 'related', 'source' => 'post', 'number' => 4, 'style' => 'compact']);
+            $sidebars['single-post-sidebar'][] = 'revayat_contextual-' . $id;
+
+            $id = $next($widgets);
+            $widgets[$id] = array_merge(self::defaults(), ['title' => 'پرونده‌های ویژه', 'mode' => 'other_dossiers', 'number' => 3, 'fallback' => false]);
+            $sidebars['single-post-sidebar'][] = 'revayat_contextual-' . $id;
         }
+
+        // 2. single-analyst_post-sidebar
+        if (empty($sidebars['single-analyst_post-sidebar'])) {
+            $sidebars['single-analyst_post-sidebar'] = [];
+            $id = $next($widgets);
+            $widgets[$id] = array_merge(self::defaults(), ['title' => 'تحلیل‌های مرتبط', 'mode' => 'related', 'source' => 'analyst_post', 'number' => 3, 'style' => 'compact']);
+            $sidebars['single-analyst_post-sidebar'][] = 'revayat_contextual-' . $id;
+
+            $id = $next($widgets);
+            $widgets[$id] = array_merge(self::defaults(), ['title' => 'پرونده‌های ویژه', 'mode' => 'other_dossiers', 'number' => 3, 'fallback' => false]);
+            $sidebars['single-analyst_post-sidebar'][] = 'revayat_contextual-' . $id;
+        }
+
+        // 3. single-multimedia-sidebar
+        if (empty($sidebars['single-multimedia-sidebar'])) {
+            $sidebars['single-multimedia-sidebar'] = [];
+            $id = $next($widgets);
+            $widgets[$id] = array_merge(self::defaults(), ['title' => 'چندرسانه‌ای‌های مرتبط', 'mode' => 'related', 'source' => 'multimedia', 'number' => 4, 'style' => 'compact']);
+            $sidebars['single-multimedia-sidebar'][] = 'revayat_contextual-' . $id;
+
+            $id = $next($widgets);
+            $widgets[$id] = array_merge(self::defaults(), ['title' => 'پرونده‌های ویژه', 'mode' => 'other_dossiers', 'number' => 3, 'fallback' => false]);
+            $sidebars['single-multimedia-sidebar'][] = 'revayat_contextual-' . $id;
+        }
+
+        // 4. single-special_dossier-sidebar
+        if (!isset($sidebars['single-special_dossier-sidebar'])) {
+            $sidebars['single-special_dossier-sidebar'] = [];
+        }
+
         update_option('widget_revayat_contextual', $widgets);
         update_option('widget_search', $search);
         update_option('sidebars_widgets', $sidebars);
-        update_option('revayat_single_widgets_initialized_v1', 1, false);
+        update_option('revayat_single_widgets_initialized_v2', 1, false);
     }
 }

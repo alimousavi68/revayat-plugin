@@ -38,6 +38,7 @@ if ( ! class_exists( 'Revayat_Companion_Meta_Fields' ) ) {
 		 * @return void
 		 */
 		public function register() {
+			$this->register_standard_post_meta();
 			$this->register_situation_room_meta();
 			$this->register_special_dossier_meta();
 			$this->register_media_observatory_meta();
@@ -907,6 +908,26 @@ if ( ! class_exists( 'Revayat_Companion_Meta_Fields' ) ) {
 					'single'            => true,
 					'show_in_rest'      => false,
 					'sanitize_callback' => 'absint',
+					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
+				)
+			);
+		}
+
+		/**
+		 * ثبت فیلدهای متای نوشته‌های استاندارد (post)
+		 *
+		 * @return void
+		 */
+		protected function register_standard_post_meta() {
+			register_post_meta(
+				'post',
+				'_revayat_hero_tag',
+				array(
+					'type'              => 'string',
+					'description'       => 'تگ کارت در هیرو سکشن صفحه اصلی (فوری، مهم، ویژه)',
+					'single'            => true,
+					'show_in_rest'      => true,
+					'sanitize_callback' => 'sanitize_text_field',
 					'auth_callback'     => array( $this, 'auth_edit_post_meta' ),
 				)
 			);

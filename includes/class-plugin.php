@@ -113,6 +113,7 @@ if ( ! class_exists( 'Revayat_Companion_Plugin' ) ) {
 			require_once REVAYAT_COMPANION_PATH . 'includes/taxonomies/class-taxonomies.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/meta/class-meta-fields.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/meta/class-dossier-status.php';
+			require_once REVAYAT_COMPANION_PATH . 'includes/meta/class-hero-tag-admin.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-dossier-links.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/meta/class-dossier-links-admin.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-content-service.php';
@@ -207,6 +208,8 @@ if ( ! class_exists( 'Revayat_Companion_Plugin' ) ) {
 			$this->loader->add_action( 'wp_ajax_revayat_validate_dossier_documents', 'Revayat_Companion_Dossier_Links_Admin', 'validate_documents' );
 			$this->loader->add_action( 'add_meta_boxes', 'Revayat_Companion_Dossier_Status', 'register_metabox' );
 			$this->loader->add_action( 'save_post_special_dossier', 'Revayat_Companion_Dossier_Status', 'save_status', 10, 2 );
+			$this->loader->add_action( 'add_meta_boxes', 'Revayat_Companion_Hero_Tag_Admin', 'register_metabox' );
+			$this->loader->add_action( 'save_post_post', 'Revayat_Companion_Hero_Tag_Admin', 'save', 10, 2 );
 			$this->loader->add_action( 'admin_init', $this->user_portal, 'restrict_admin' );
 			$this->loader->add_action( 'admin_menu', $this->user_portal, 'register_approval_page' );
 			$this->loader->add_action( 'admin_menu', $this->user_portal, 'register_special_access_page' );
