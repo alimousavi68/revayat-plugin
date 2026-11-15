@@ -42,11 +42,13 @@ class Revayat_Companion_Member_Applications {
 			if ( in_array( $state, array( 'pending', 'approved' ), true ) ) { return new WP_Error( 'invalid_state', 'درخواست فعال دارید؛ نیازی به ارسال دوباره نیست.', array( 'application' => self::snapshot( $user_id, $type ) ) ); }
 			if ( 'situation' === $type && ! Revayat_Companion_Private_Documents::ready() ) { return new WP_Error( 'documents_unavailable', 'ارسال درخواست دسترسی به اتاق وضعیت فعلاً در دسترس نیست. لطفاً بعداً مراجعه کنید.' ); }
 			$data = array();
-			foreach ( array( 'full_name', 'role_title', 'organization', 'expertise', 'bio', 'sample_url', 'reason' ) as $field ) { $data[ $field ] = sanitize_textarea_field( $input[ $field ] ?? '' ); if ( mb_strlen( $data[ $field ] ) > ( 'bio' === $field ? 3000 : 500 ) ) { return new WP_Error( 'too_long', 'طول یکی از فیلدها بیش از حد مجاز است.' ); } }
+			foreach ( array( 'full_name', 'role_title', 'organization', 'expertise', 'referrer', 'bio', 'sample_url', 'reason' ) as $field ) { $data[ $field ] = sanitize_textarea_field( $input[ $field ] ?? '' ); if ( mb_strlen( $data[ $field ] ) > ( 'bio' === $field ? 3000 : 500 ) ) { return new WP_Error( 'too_long', 'طول یکی از فیلدها بیش از حد مجاز است.' ); } }
 			if ( $data['sample_url'] && ( ! in_array( strtolower( (string) wp_parse_url( $data['sample_url'], PHP_URL_SCHEME ) ), array( 'http', 'https' ), true ) || ! wp_parse_url( $data['sample_url'], PHP_URL_HOST ) ) ) { return new WP_Error( 'sample_invalid', 'پیوند نمونه تحلیل باید آدرس معتبر با http:// یا https:// باشد.', array( 'field' => 'sample_url' ) ); }
 			$data['sample_url'] = esc_url_raw( $data['sample_url'], array( 'http', 'https' ) );
 			if ( 'submit' === $mode ) {
 				if ( mb_strlen( $data['full_name'] ) < 3 ) { return new WP_Error( 'incomplete', 'نام و نام خانوادگی را کامل وارد کنید.', array( 'field' => 'full_name' ) ); }
+				$terms_enabled = function_exists( 'revayat_is_terms_enabled' ) ? revayat_is_terms_enabled() : (bool) get_theme_mod( 'revayat_terms_enabled', true );
+				if ( $terms_enabled && empty( $input['terms_consent'] ) ) { return new WP_Error( 'incomplete', 'مطالعه و پذیرش قوانین و مقررات سایت الزامی است.', array( 'field' => 'terms_consent' ) ); }
 				if ( empty( $input['consent'] ) ) { return new WP_Error( 'incomplete', 'صحت اطلاعات و شرایط درخواست را تأیید کنید.', array( 'field' => 'consent' ) ); }
 				if ( 'analyst' === $type && ! $data['expertise'] ) { return new WP_Error( 'incomplete', 'حوزه تخصصی خود را وارد کنید.', array( 'field' => 'expertise' ) ); }
 				if ( 'analyst' === $type && mb_strlen( $data['bio'] ) < 30 ) { return new WP_Error( 'incomplete', 'معرفی حرفه‌ای باید حداقل ۳۰ نویسه باشد.', array( 'field' => 'bio' ) ); }
@@ -72,6 +74,7 @@ class Revayat_Companion_Member_Applications {
 			}
 			foreach ( $uploaded as $field => $token ) { if ( ! empty( $documents[ $field ] ) ) { Revayat_Companion_Private_Documents::delete( $documents[ $field ] ); } $documents[ $field ] = $token; }
 			update_post_meta( $post->ID, '_rv_payload', $data );
+			if ( ! empty( $data['referrer'] ) ) { update_user_meta( $user_id, '_revayat_referrer', $data['referrer'] ); }
 			if ( 'situation' === $type ) { update_post_meta( $post->ID, '_rv_documents', $documents ); update_post_meta( $post->ID, '_rv_national_id', Revayat_Companion_Private_Documents::encrypt( $national ) ); }
 			self::transition( $post, 'submit' === $mode ? 'pending' : 'draft', $user_id, '' );
 			$result = array( 'message' => 'submit' === $mode ? 'درخواست ثبت شد و در انتظار بررسی است؛ نتیجه را از درخواست‌های من پیگیری کنید.' : 'پیش‌نویس ذخیره شد؛ هنوز برای بررسی ارسال نشده است.', 'version' => (int) get_post_meta( $post->ID, '_rv_version', true ), 'application' => self::snapshot( $user_id, $type ) );
