@@ -184,12 +184,6 @@ if ( ! class_exists( 'Revayat_Companion_Homepage_Provider' ) ) {
 				'post',
 				array(
 					'posts_per_page' => 8,
-					'tax_query'      => array(
-						array(
-							'taxonomy' => 'news_source',
-							'operator' => 'EXISTS',
-						),
-					),
 				)
 			);
 		}
