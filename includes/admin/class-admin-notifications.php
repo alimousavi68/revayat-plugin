@@ -23,8 +23,11 @@ class Revayat_Companion_Admin_Notifications {
   $page = sanitize_key( wp_unslash( $_GET['page'] ?? '' ) );
   if ( isset( $types[ $page ] ) && self::permitted() ) { wp_safe_redirect( self::url( array( 'type' => $types[ $page ] ) ) ); exit; }
  }
- /** Require the administrator role as well as capabilities; delegated reviewers are excluded. */
+ /** Allow administrator, chief_editor, and service_editor (with assigned services) when active. */
  public static function can_manage( $user_id ) {
+  if ( class_exists( 'Revayat_Companion_Editorial_Access' ) ) {
+   return Revayat_Companion_Editorial_Access::can_review_approvals( (int) $user_id );
+  }
   $user = get_userdata( $user_id );
   return $user && in_array( 'administrator', (array) $user->roles, true ) && user_can( $user, 'manage_options' ) && user_can( $user, 'revayat_manage_approvals' ) && Revayat_Companion_Member_Policy::active( $user->ID );
  }
@@ -47,7 +50,13 @@ class Revayat_Companion_Admin_Notifications {
  public static function url( $args = array() ) { return add_query_arg( array_merge( array( 'page' => 'revayat-member-applications' ), $args ), admin_url( 'users.php' ) ); }
  private static function sql( $unread = false ) {
   global $wpdb;
-  $sql = " FROM $wpdb->posts p INNER JOIN $wpdb->postmeta s ON s.post_id=p.ID AND s.meta_key='_rv_state' AND s.meta_value='pending' INNER JOIN $wpdb->postmeta t ON t.post_id=p.ID AND t.meta_key='_rv_type' AND t.meta_value IN ('analyst','situation') LEFT JOIN $wpdb->postmeta v ON v.post_id=p.ID AND v.meta_key='_rv_version' LEFT JOIN $wpdb->postmeta d ON d.post_id=p.ID AND d.meta_key='_rv_submitted_at' LEFT JOIN $wpdb->usermeta r ON r.user_id=%d AND r.meta_key=CONCAT('_rv_admin_read_',p.ID) WHERE p.post_type='rv_application' AND p.post_status='private'";
+  $svc_filter = '';
+  if ( class_exists( 'Revayat_Companion_Editorial_Access' ) && Revayat_Companion_Editorial_Access::is_service_editor() ) {
+   $svc_ids = array_map( 'intval', Revayat_Companion_Editorial_Access::user_service_ids() );
+   $in_list = ! empty( $svc_ids ) ? implode( ',', $svc_ids ) : '0';
+   $svc_filter = " AND (sv.meta_value IS NULL OR sv.meta_value='' OR sv.meta_value='0' OR CAST(sv.meta_value AS UNSIGNED) IN ($in_list))";
+  }
+  $sql = " FROM $wpdb->posts p INNER JOIN $wpdb->postmeta s ON s.post_id=p.ID AND s.meta_key='_rv_state' AND s.meta_value='pending' INNER JOIN $wpdb->postmeta t ON t.post_id=p.ID AND t.meta_key='_rv_type' AND t.meta_value IN ('analyst','situation') LEFT JOIN $wpdb->postmeta v ON v.post_id=p.ID AND v.meta_key='_rv_version' LEFT JOIN $wpdb->postmeta d ON d.post_id=p.ID AND d.meta_key='_rv_submitted_at' LEFT JOIN $wpdb->postmeta sv ON sv.post_id=p.ID AND sv.meta_key='_rv_service_id' LEFT JOIN $wpdb->usermeta r ON r.user_id=%d AND r.meta_key=CONCAT('_rv_admin_read_',p.ID) WHERE p.post_type='rv_application' AND p.post_status='private'" . $svc_filter;
   if ( $unread ) { $sql .= ' AND COALESCE(CAST(r.meta_value AS UNSIGNED),0)<GREATEST(COALESCE(CAST(v.meta_value AS UNSIGNED),1),1)'; }
   return $wpdb->prepare( $sql, get_current_user_id() );
  }

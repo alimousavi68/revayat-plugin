@@ -139,6 +139,8 @@ if ( ! class_exists( 'Revayat_Companion_Plugin' ) ) {
 			require_once REVAYAT_COMPANION_PATH . 'includes/admin/class-member-applications-admin.php';
 			require_once REVAYAT_COMPANION_PATH . 'includes/admin/class-admin-notifications.php';
 			Revayat_Companion_Admin_Notifications::hooks();
+			require_once REVAYAT_COMPANION_PATH . 'includes/services/class-editorial-access.php';
+			Revayat_Companion_Editorial_Access::hooks();
 			require_once REVAYAT_COMPANION_PATH . 'includes/widgets/class-contextual-widget.php';
 
 			$this->post_types  = new Revayat_Companion_Post_Types();

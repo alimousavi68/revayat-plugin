@@ -43,6 +43,9 @@ class Revayat_Companion_Member_Applications {
 			if ( 'situation' === $type && ! Revayat_Companion_Private_Documents::ready() ) { return new WP_Error( 'documents_unavailable', 'ارسال درخواست دسترسی به اتاق وضعیت فعلاً در دسترس نیست. لطفاً بعداً مراجعه کنید.' ); }
 			$data = array();
 			foreach ( array( 'full_name', 'role_title', 'organization', 'expertise', 'referrer', 'bio', 'sample_url', 'reason' ) as $field ) { $data[ $field ] = sanitize_textarea_field( $input[ $field ] ?? '' ); if ( mb_strlen( $data[ $field ] ) > ( 'bio' === $field ? 3000 : 500 ) ) { return new WP_Error( 'too_long', 'طول یکی از فیلدها بیش از حد مجاز است.' ); } }
+			$service_id = absint( $input['service_id'] ?? 0 );
+			if ( $service_id > 0 && ! term_exists( $service_id, 'category' ) ) { $service_id = 0; }
+			$data['service_id'] = $service_id;
 			if ( $data['sample_url'] && ( ! in_array( strtolower( (string) wp_parse_url( $data['sample_url'], PHP_URL_SCHEME ) ), array( 'http', 'https' ), true ) || ! wp_parse_url( $data['sample_url'], PHP_URL_HOST ) ) ) { return new WP_Error( 'sample_invalid', 'پیوند نمونه تحلیل باید آدرس معتبر با http:// یا https:// باشد.', array( 'field' => 'sample_url' ) ); }
 			$data['sample_url'] = esc_url_raw( $data['sample_url'], array( 'http', 'https' ) );
 			if ( 'submit' === $mode ) {
@@ -74,6 +77,7 @@ class Revayat_Companion_Member_Applications {
 			}
 			foreach ( $uploaded as $field => $token ) { if ( ! empty( $documents[ $field ] ) ) { Revayat_Companion_Private_Documents::delete( $documents[ $field ] ); } $documents[ $field ] = $token; }
 			update_post_meta( $post->ID, '_rv_payload', $data );
+			update_post_meta( $post->ID, '_rv_service_id', (int) ( $data['service_id'] ?? 0 ) );
 			if ( ! empty( $data['referrer'] ) ) { update_user_meta( $user_id, '_revayat_referrer', $data['referrer'] ); }
 			if ( 'situation' === $type ) { update_post_meta( $post->ID, '_rv_documents', $documents ); update_post_meta( $post->ID, '_rv_national_id', Revayat_Companion_Private_Documents::encrypt( $national ) ); }
 			self::transition( $post, 'submit' === $mode ? 'pending' : 'draft', $user_id, '' );
@@ -109,6 +113,7 @@ class Revayat_Companion_Member_Applications {
 		if ( ! Revayat_Companion_Admin_Notifications::can_manage( $reviewer ) ) { return new WP_Error( 'forbidden', 'مجوز بررسی ندارید.' ); }
 		$post = get_post( $id );
 		if ( ! $post || 'rv_application' !== $post->post_type || (int) $post->post_author === (int) $reviewer ) { return new WP_Error( 'not_found', 'درخواست یافت نشد.' ); }
+		if ( class_exists( 'Revayat_Companion_Editorial_Access' ) && ! Revayat_Companion_Editorial_Access::can_access_application( (int) $reviewer, $post ) ) { return new WP_Error( 'forbidden', 'این درخواست مربوط به سرویس مجاز شما نیست.' ); }
 		$type = get_post_meta( $id, '_rv_type', true );
 		return Revayat_Companion_Workflow_Lock::run( 'application:' . $post->post_author . ':' . $type, static function () use ( $post, $id, $state, $reason, $version, $reviewer, $type ) {
 			$current = self::state( $post );
